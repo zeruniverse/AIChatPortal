@@ -2,9 +2,11 @@ const COMPLETE_THINK = /<think\b[^>]*>([\s\S]*?)<\/think\s*>/gi;
 const OPEN_THINK = /<think\b[^>]*>/i;
 
 export function stripAnswerPrefix(value) {
-  return String(value ?? '')
-    .replace(/^\s*(?:answer|回答)\s*[:：]\s*(?:\r?\n)?/i, '')
-    .trimStart();
+  const trimmed = String(value ?? '').trimStart().trimEnd();
+  return trimmed
+    .replace(/^(?:answer|回答)\s*[:：][ \t]*(?:\r?\n)?/i, '')
+    .trimStart()
+    .trimEnd();
 }
 
 export function parseModelResponse(value) {
@@ -39,7 +41,7 @@ export function parseModelResponse(value) {
 
   return {
     thoughts,
-    answer: stripAnswerPrefix(answerSource).trimEnd(),
+    answer: stripAnswerPrefix(answerSource),
     hasThinking: thoughts.length > 0,
     thinkingOpen: thoughts.some((thought) => !thought.complete),
   };

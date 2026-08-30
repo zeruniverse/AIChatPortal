@@ -38,3 +38,37 @@ test('示例型长回答能提取思考和最终回答', () => {
   assert.equal(parsed.thoughts[0].content.includes('bash -lc'), true);
   assert.equal(parsed.answer, '这是最终结论。');
 });
+
+
+test('没有目标前缀时仅 trim 首尾空白，正文中的 Answer/回答 不删除', () => {
+  const raw = '  正文第一行\nAnswer:\n中间标签保留\n  ';
+  const expected = '正文第一行\nAnswer:\n中间标签保留';
+  assert.equal(stripAnswerPrefix(raw), expected);
+  assert.equal(parseModelResponse(raw).answer, expected);
+});
+
+test('开头先有任意空白再有 Answer/回答 前缀时仍删除提示符', () => {
+  assert.equal(stripAnswerPrefix('  \n\tAnswer:\nhello  \n'), 'hello');
+  assert.equal(stripAnswerPrefix('\r\n \t回答：\r\n你好\r\n'), '你好');
+  assert.equal(stripAnswerPrefix('\n\n answer :   hello   '), 'hello');
+});
+
+test('只删除开头的 Answer/回答 前缀，正文中同样的字样必须保留', () => {
+  assert.equal(stripAnswerPrefix('正文第一行\nAnswer:\n这是回答的一部分'), '正文第一行\nAnswer:\n这是回答的一部分');
+  assert.equal(stripAnswerPrefix('正文第一行\n回答：这是回答的一部分'), '正文第一行\n回答：这是回答的一部分');
+  assert.equal(stripAnswerPrefix('前言 Answer: 不在开头'), '前言 Answer: 不在开头');
+});
+
+test('有 think 时只删除最后一个 </think> 后（可先有空白）的 Answer/回答 前缀', () => {
+  const withPrefix = parseModelResponse('<think>分析</think>\n\n  \tAnswer:\n最终答案  \n');
+  assert.equal(withPrefix.answer, '最终答案');
+
+  const chineseWithPrefix = parseModelResponse('<think>分析</think>\r\n \t 回答：\r\n最终答案');
+  assert.equal(chineseWithPrefix.answer, '最终答案');
+
+  const answerContainsPrefix = parseModelResponse('<think>分析</think>\n\n最终答案第一行\nAnswer:\n这是最终答案正文的一部分');
+  assert.equal(answerContainsPrefix.answer, '最终答案第一行\nAnswer:\n这是最终答案正文的一部分');
+
+  const chineseContainsPrefix = parseModelResponse('<think>分析</think>\n\n最终答案第一行\n回答：这是正文的一部分');
+  assert.equal(chineseContainsPrefix.answer, '最终答案第一行\n回答：这是正文的一部分');
+});

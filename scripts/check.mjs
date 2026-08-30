@@ -10,7 +10,7 @@ import { createDatabase } from '../server/db.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
   'package.json', 'vite.config.js', 'frontend/index.html',
-  'frontend/src/main.js', 'frontend/src/state.js', 'frontend/src/api.js', 'frontend/src/id.js',
+  'frontend/src/main.js', 'frontend/src/state.js', 'frontend/src/api.js', 'frontend/src/id.js', 'frontend/src/keyboard-submit.js',
   'frontend/src/views/LoginPage.vue', 'frontend/src/views/NewChat.vue',
   'frontend/src/views/HistoryPage.vue', 'frontend/src/views/ChatDetail.vue',
   'frontend/src/views/PublicShare.vue', 'frontend/src/components/FilePicker.vue',
@@ -41,7 +41,7 @@ for (const model of config.models) {
 }
 
 const packageJson = JSON.parse(read('package.json'));
-if (packageJson.version !== '5.2.0') throw new Error('项目版本必须为 5.2.0');
+if (packageJson.version !== '5.3.1') throw new Error('项目版本必须为 5.3.1');
 for (const [name, version] of Object.entries({ ...packageJson.dependencies, ...packageJson.devDependencies })) {
   if (/^[~^*]|\bx\b/i.test(version)) throw new Error(`依赖 ${name} 没有固定版本：${version}`);
 }
@@ -53,6 +53,7 @@ const sources = Object.fromEntries([
   'state', 'frontend/src/state.js',
   'api', 'frontend/src/api.js',
   'id', 'frontend/src/id.js',
+  'keyboardSubmit', 'frontend/src/keyboard-submit.js',
   'login', 'frontend/src/views/LoginPage.vue',
   'picker', 'frontend/src/components/FilePicker.vue',
   'newChat', 'frontend/src/views/NewChat.vue',
@@ -92,6 +93,8 @@ const checks = [
   [sources.publicShare.includes('复制问题') && sources.publicShare.includes('复制回答'), '分享页缺少问题或回答复制按钮'],
   [sources.modelAnswer.includes('查看思考过程') && sources.modelAnswer.includes('隐藏思考过程'), '回答组件缺少思考过程展开/隐藏链接'],
   [sources.answerFormat.includes('COMPLETE_THINK') && sources.answerFormat.includes('stripAnswerPrefix'), '缺少多段 think 解析或 Answer/回答 前缀清理'],
+  [sources.keyboardSubmit.includes("event.key !== 'Enter'") && sources.keyboardSubmit.includes('event.shiftKey') && sources.keyboardSubmit.includes('event.ctrlKey || event.metaKey') && sources.keyboardSubmit.includes('event.isComposing'), 'Ctrl/Cmd+Enter 提交快捷键规则不完整'],
+  [sources.newChat.includes('@keydown="handlePromptKeydown"') && sources.detail.includes('@keydown="handleFollowUpKeydown"'), '首次提问或追问输入框没有绑定快捷提交'],
   [sources.html.includes('viewport-fit=cover'), '缺少手机安全区 viewport 配置'],
   [/type="file"[\s\S]*multiple/.test(sources.picker), '附件选择器没有开启多选'],
   [!sources.picker.includes('accept='), '附件选择器不应限制文件类型'],

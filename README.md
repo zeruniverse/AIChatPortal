@@ -1,4 +1,4 @@
-# OpenAI-compatible 多轮问答 Web App（v5.2）
+# OpenAI-compatible 多轮问答 Web App（v5.3）
 
 这是一个可直接部署的 Node.js + Express 后端、Vue 3 + Vite 前端的多轮问答应用。浏览器页面可以使用普通 HTTP，后端可以连接 HTTP 或 HTTPS 的 OpenAI-compatible `chat/completions` provider。
 
@@ -383,3 +383,10 @@ Node cluster
 ```
 
 SQLite、对话级任务队列和附件 bin 原子替换按单进程设计。多实例共享目录可能造成重复调用 provider 或附件更新互相覆盖。
+
+## v5.3 键盘提交与回答前缀规则
+
+- 首次提问和追问输入框支持 `Ctrl+Enter`（Windows/Linux）或 `Cmd+Enter`（macOS）提交。普通 `Enter`、`Shift+Enter` 以及 `Ctrl/Cmd+Shift+Enter` 都只用于输入，不触发提交；输入法组合阶段也不会误提交。
+- `Answer:` / `回答:` / `回答：` 仅在整个最终回答开头，或最后一个 `</think>` 后的最终回答开头时删除。正文中间出现的同样字样一律保留。
+
+- 最终回答继续执行 `trimStart()` / `trimEnd()`；若回答开头或最后一个 `</think>` 后先有空白，再出现 `Answer:` / `回答:` / `回答：`，仍会删除该 provider 提示符；正文中间的同名文字不会删除。

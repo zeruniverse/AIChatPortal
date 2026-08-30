@@ -7,6 +7,7 @@ import ModelAnswer from '../components/ModelAnswer.vue';
 import StatusPill from '../components/StatusPill.vue';
 import { absoluteUrl, apiFetch, createFollowUp, formatBytes, formatDate } from '../api.js';
 import { copyableAnswer } from '../answer-format.js';
+import { submitOnShortcut } from '../keyboard-submit.js';
 import { appState, clearPendingChat } from '../state.js';
 
 const route = useRoute();
@@ -146,6 +147,10 @@ async function setSharing(enabled) {
     chat.value = { ...chat.value, ...updated };
   } catch (shareError) { error.value = shareError.message; }
   finally { changingShare.value = false; }
+}
+
+function handleFollowUpKeydown(event) {
+  submitOnShortcut(event, () => { void submitFollowUp(); });
 }
 
 async function submitFollowUp() {
@@ -313,7 +318,7 @@ onBeforeUnmount(() => { eventSource?.close(); });
       </div>
 
       <form v-if="canFollowUp" class="follow-up-composer" @submit.prevent="submitFollowUp">
-        <div class="field-group"><label for="follow-prompt">继续追问</label><textarea id="follow-prompt" v-model="followPrompt" rows="5" :maxlength="limits.maxPromptChars || 100000" placeholder="输入新的追问……"></textarea></div>
+        <div class="field-group"><label for="follow-prompt">继续追问</label><textarea id="follow-prompt" v-model="followPrompt" rows="5" :maxlength="limits.maxPromptChars || 100000" placeholder="输入新的追问……" @keydown="handleFollowUpKeydown"></textarea></div>
         <FilePicker v-model="followFiles" :disabled="followSubmitting" :max-files="limits.maxFiles || 100" :max-raw-bytes="limits.maxRawUploadBytes || 536870912" @error="error = $event" />
         <p class="follow-up-note">新附件会单独保存为第 {{ (latestTurn?.turnNo || 0) + 1 }} 轮 ZIP；发给模型时，服务器会把从 1.zip 到本轮的所有轮次 ZIP 再打包并藏入图片。</p>
         <button class="primary-button submit-button" type="submit" :disabled="!followPrompt.trim() || followSubmitting"><span v-if="followSubmitting" class="spinner"></span>{{ followSubmitting ? `上传中 ${Math.round(followProgress * 100)}%` : '提交追问' }}</button>

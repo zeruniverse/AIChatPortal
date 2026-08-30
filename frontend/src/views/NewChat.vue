@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import FilePicker from '../components/FilePicker.vue';
 import { createChat, formatBytes } from '../api.js';
 import { createClientConversationId } from '../id.js';
+import { submitOnShortcut } from '../keyboard-submit.js';
 import { appState, failPendingChat, finishPendingChat, loadAppConfig, startPendingChat, updatePendingChat } from '../state.js';
 
 const router = useRouter();
@@ -21,6 +22,10 @@ onMounted(async () => {
     if (!modelId.value) modelId.value = loaded.models[0]?.id || '';
   } catch { /* global banner */ }
 });
+
+function handlePromptKeydown(event) {
+  submitOnShortcut(event, () => { void submit(); });
+}
 
 async function submit() {
   error.value = '';
@@ -65,7 +70,7 @@ async function submit() {
       </div>
       <div class="field-group prompt-field">
         <label for="prompt">你的问题</label>
-        <textarea id="prompt" v-model="prompt" rows="7" :maxlength="config?.limits.maxPromptChars || 100000" :disabled="submitting" placeholder="输入问题，回答完成后可以继续追问……"></textarea>
+        <textarea id="prompt" v-model="prompt" rows="7" :maxlength="config?.limits.maxPromptChars || 100000" :disabled="submitting" placeholder="输入问题，回答完成后可以继续追问……" @keydown="handlePromptKeydown"></textarea>
         <span class="character-count">{{ prompt.length.toLocaleString() }} / {{ (config?.limits.maxPromptChars || 100000).toLocaleString() }}</span>
       </div>
       <FilePicker v-model="files" :disabled="submitting" :max-files="config?.limits.maxFiles || 100" :max-raw-bytes="config?.limits.maxRawUploadBytes || 536870912" @error="error = $event" />
