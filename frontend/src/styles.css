@@ -44,6 +44,7 @@ h2 { font-size: 1.1rem; }
 .button.compact { min-height: 38px; padding: 6px 10px; font-size: .88rem; }
 .button.full { width: 100%; }
 .button:disabled { opacity: .5; cursor: not-allowed; }
+.conversation-header > .button { flex: 0 0 auto; min-width: max-content; white-space: nowrap; }
 .composer { display: grid; gap: 18px; }
 .check-row { grid-template-columns: auto 1fr; align-items: center; }
 .check-row input { width: 20px; height: 20px; }

@@ -24,3 +24,8 @@ test('password visibility button is non-wrapping and has reserved width', () => 
   assert.match(login, /password-toggle/);
   assert.match(css, /\.password-toggle\s*\{[^}]*min-width:\s*72px;[^}]*white-space:\s*nowrap;/s);
 });
+
+
+test('conversation delete button never wraps', () => {
+  assert.match(css, /\.conversation-header > \.button\s*\{[^}]*flex:\s*0 0 auto;[^}]*min-width:\s*max-content;[^}]*white-space:\s*nowrap;/s);
+});
