@@ -4,167 +4,150 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { createDatabase } from '../server/db.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
-  'server/app.js',
-  'server/auth.js',
-  'server/config.js',
-  'server/cleanup.js',
-  'server/db.js',
-  'server/provider.js',
-  'server/worker.js',
-  'server/filenames.js',
-  'server/jsonl.js',
-  'server/redact.js',
-  'server/mutex.js',
-  'server/assets/a.jpg',
-  'frontend/index.html',
-  'frontend/src/App.vue',
-  'frontend/src/api.js',
-  'frontend/src/state.js',
-  'frontend/src/views/LoginPage.vue',
-  'frontend/src/views/NewChat.vue',
-  'frontend/src/views/HistoryPage.vue',
-  'frontend/src/views/ChatDetail.vue',
-  'frontend/src/views/PublicShare.vue',
-  'frontend/src/components/FilePicker.vue',
-  'frontend/src/styles.css',
-  'chat/sqlite.db',
-  'config.json',
-  'config.example.json',
-  'Dockerfile',
-  'docker-compose.yml',
-  'README.md',
-  'AUDIT.md',
+  'package.json', 'vite.config.js', 'frontend/index.html',
+  'frontend/src/main.js', 'frontend/src/state.js', 'frontend/src/api.js',
+  'frontend/src/views/LoginPage.vue', 'frontend/src/views/NewChat.vue',
+  'frontend/src/views/HistoryPage.vue', 'frontend/src/views/ChatDetail.vue',
+  'frontend/src/views/PublicShare.vue', 'frontend/src/components/FilePicker.vue',
+  'frontend/src/components/StatusPill.vue', 'frontend/src/styles.css',
+  'server/app.js', 'server/auth.js', 'server/config.js', 'server/db.js',
+  'server/storage.js', 'server/archive.js', 'server/worker.js',
+  'server/provider.js', 'server/prompts.js', 'server/cleanup.js',
+  'server/assets/x.jpg', 'chat/sqlite.db', 'config.json', 'config.example.json',
+  'Dockerfile', 'docker-compose.yml', 'README.md', 'AUDIT.md',
 ];
 for (const relative of required) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`缺少文件：${relative}`);
 }
 
-const config = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
-if (!Array.isArray(config.models) || config.models.length !== 4) {
-  throw new Error('config.json 必须配置 4 个模型');
-}
-if (!Array.isArray(config.auth?.users) || config.auth.users.length < 1) {
-  throw new Error('config.json 必须至少配置一个登录用户');
-}
-if (new Set(config.auth.users.map((user) => user.id)).size !== config.auth.users.length) {
-  throw new Error('config.json 用户 id 重复');
-}
-if (new Set(config.auth.users.map((user) => user.token)).size !== config.auth.users.length) {
-  throw new Error('config.json 用户 token 重复');
-}
-if (String(config.auth.sessionSecret || '').length < 32) {
-  throw new Error('config.json sessionSecret 太短');
-}
-if (config.limits.maxCompressedAttachmentBytes > 70_000_000) {
-  throw new Error('压缩附件上限超过 70,000,000 字节');
-}
-if (config.limits.maxParallelTasks > 10) {
-  throw new Error('并行任务上限超过 10');
-}
-
-const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-for (const [name, version] of Object.entries({
-  ...packageJson.dependencies,
-  ...packageJson.devDependencies,
-})) {
-  if (/^[~^*]|\bx\b/i.test(version)) throw new Error(`依赖 ${name} 未固定版本：${version}`);
-}
-
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
-const html = read('frontend/index.html');
-const appVue = read('frontend/src/App.vue');
-const main = read('frontend/src/main.js');
-const api = read('frontend/src/api.js');
-const state = read('frontend/src/state.js');
-const picker = read('frontend/src/components/FilePicker.vue');
-const newChat = read('frontend/src/views/NewChat.vue');
-const history = read('frontend/src/views/HistoryPage.vue');
-const detail = read('frontend/src/views/ChatDetail.vue');
-const publicShare = read('frontend/src/views/PublicShare.vue');
-const css = read('frontend/src/styles.css');
-const server = read('server/app.js');
-const auth = read('server/auth.js');
-const runtimeConfig = read('server/config.js');
-const db = read('server/db.js');
-const cleanup = read('server/cleanup.js');
-const provider = read('server/provider.js');
-const worker = read('server/worker.js');
-const filenames = read('server/filenames.js');
-const jsonl = read('server/jsonl.js');
-const readme = read('README.md');
+const config = JSON.parse(read('config.json'));
+if (!Array.isArray(config.models) || config.models.length !== 4) throw new Error('config.json 必须且只能配置 4 个模型');
+if (!Array.isArray(config.auth?.users) || config.auth.users.length < 1) throw new Error('config.json 至少需要一个登录 token');
+if (new Set(config.auth.users.map((user) => user.id)).size !== config.auth.users.length) throw new Error('登录用户 id 重复');
+if (new Set(config.auth.users.map((user) => user.token)).size !== config.auth.users.length) throw new Error('登录 token 重复');
+if (String(config.auth.sessionSecret || '').length < 32) throw new Error('sessionSecret 少于 32 个字符');
+if (config.limits.maxParallelTasks > 10) throw new Error('全局并行任务上限超过 10');
+if (config.limits.maxCompressedAttachmentBytes > 70_000_000) throw new Error('压缩附件上限超过 70,000,000 字节');
+for (const model of config.models) {
+  if (!model.id || !model.label || typeof model.request !== 'object') throw new Error('模型配置缺少 id、label 或 request');
+}
 
-const assertions = [
-  [html.includes('viewport-fit=cover'), '缺少移动端 viewport-fit=cover'],
-  [/type="file"[\s\S]*multiple/.test(picker), '附件选择器必须支持 multiple'],
-  [!picker.includes('accept='), '附件选择器不应限制文件类型'],
-  [picker.includes('手机可直接打开系统文件选择器'), '附件选择器缺少手机端说明'],
-  [css.includes('100dvh'), '缺少动态视口高度支持'],
-  [css.includes('safe-area-inset-bottom'), '缺少手机安全区适配'],
-  [css.includes('@media (max-width: 767px)'), '缺少移动端断点'],
-  [css.includes('font-size: 16px'), '移动端表单字号不足，iOS 可能自动放大'],
-  [css.includes('min-height: 44px') || css.includes('width: 44px'), '缺少移动端触控尺寸适配'],
-  [css.includes('overflow-wrap: anywhere'), '缺少长文本或长文件名换行保护'],
-  [css.includes('focus-visible'), '缺少键盘焦点样式'],
-  [main.includes("name: 'login'") && main.includes('ensureAuthenticated'), '首页缺少登录路由保护'],
-  [main.includes("name: 'share'") && main.includes("meta: { public: true"), '分享页面未设置为免登录'],
-  [state.includes('localStorage') || api.includes('localStorage'), '登录 token 未持久保存在浏览器'],
-  [auth.includes('timingSafeEqual'), '登录 token 未使用恒定时间比较'],
-  [auth.includes('HttpOnly') && auth.includes('SameSite=Strict'), '登录会话 Cookie 缺少安全属性'],
-  [auth.includes('tokenFingerprint'), '登录会话未绑定当前配置 token，轮换 token 后旧会话仍可能有效'],
-  [runtimeConfig.includes('looksLikePlaceholder'), '运行时未拒绝公开示例登录凭据'],
-  [server.includes("app.use('/api', auth.requireAuth)"), '私有 API 缺少统一登录保护'],
-  [db.includes('WHERE id = ? AND owner_id = ?'), '详情访问缺少用户归属隔离'],
-  [db.includes('WHERE owner_id=? ORDER BY created_at DESC'), '历史列表缺少用户归属隔离'],
-  [server.includes('database.deleteOwnedAll(ownerId)'), '删除全部没有按当前用户隔离'],
-  [server.includes('randomBytes(32).toString'), '分享随机串不足 256 位'],
-  [server.includes('/api/public/shares/:shareToken/attachments'), '公开分享缺少附件整包下载接口'],
-  [server.includes("error: chat.error"), '公开分享未返回脱敏后的 provider 错误原因'],
-  [detail.includes("answer.value = payload.error || '模型调用失败'") && publicShare.includes("answer.value = payload.error || '模型调用失败'"), '调用失败时错误原因未替代回答'],
-  [detail.includes("'answer-error': chat.status === 'failed'") && publicShare.includes("'answer-error': chat.status === 'failed'"), '失败回答缺少明确错误样式'],
-  [publicShare.includes('下载全部附件'), '公开分享前端缺少附件下载入口'],
-  [publicShare.includes('verifyShareAccess') && publicShare.includes('checkError.status === 404'), '公开分享断线重连时未重新确认链接是否仍有效'],
-  [newChat.includes('shareEnabled'), '提问页缺少开启分享选项'],
-  [detail.includes('setSharing') && detail.includes('复制链接'), '问题详情页缺少分享开关或复制链接'],
-  [server.includes('strictTransportSecurity: false'), 'HTTP 访问可能被 HSTS 强制升级'],
-  [server.includes('upgradeInsecureRequests: null'), 'HTTP 页面资源可能被 CSP 强制升级为 HTTPS'],
-  [server.includes('server.requestTimeout = 0'), '服务器请求超时未关闭'],
-  [provider.includes('timeout: 0'), 'provider 请求超时未关闭'],
-  [provider.includes("target.protocol === 'https:' ? https : http"), 'provider 未同时支持 HTTP/HTTPS'],
-  [provider.includes('maxAnswerChars'), 'provider 流式回答缺少长度限制'],
-  [provider.includes('formatProviderError') && provider.includes('providerErrorDetail'), 'provider 错误缺少可读原因提取'],
-  [worker.includes('this.database.resetInterrupted()'), '缺少重启任务恢复'],
-  [provider.includes('cat a.jpg all_att.zip > xa.jpg'), '缺少附件生成说明'],
-  [worker.includes('sequence: deltaSequence'), '流式分片缺少去重序号'],
-  [server.includes('deltaSequence: text.deltaSequence'), 'SSE 快照缺少分片序号'],
-  [server.includes('commitMutex.runExclusive'), '提交与删除全部缺少互斥提交保护'],
-  [server.includes('submissionsInProgress'), '上传阶段未计入并发槽位'],
-  [server.includes('generationAtStart !== generationFor(ownerId)'), '删除全部未使当前用户的旧上传提交失效'],
-  [detail.includes('currentDeltaSequence') && publicShare.includes('currentDeltaSequence'), '前端 SSE 重连缺少分片去重'],
-  [history.includes('加载更多'), '历史页缺少分页加载'],
-  [filenames.includes("replace(/\\\\/g, '/')"), 'ZIP 文件名未处理 Windows 路径分隔符'],
-  [jsonl.includes('ensureTrailingNewline'), '缺少崩溃后 JSONL 尾行修复'],
-  [db.includes('PRAGMA journal_mode = DELETE'), 'SQLite 未使用单文件友好的 DELETE journal 模式'],
-  [cleanup.includes('3_000_000_000') && cleanup.includes('7 * 24 * 60 * 60 * 1000') && cleanup.includes('24 * 60 * 60 * 1000'), '自动清理阈值或保留期不符合要求'],
-  [cleanup.includes('setInterval') && server.includes("cleanup.run('startup')") && server.includes('cleanup.start()'), '自动清理未在启动时和定时执行'],
-  [db.includes('listIdsCreatedBefore') && db.includes('deleteInternalIds'), '数据库缺少按时间批量清理能力'],
-  [readme.includes('只运行一个应用实例'), 'README 缺少单实例部署限制'],
-  [readme.includes('公开分享') && readme.includes('下载全部附件'), 'README 缺少分享附件权限说明'],
+const packageJson = JSON.parse(read('package.json'));
+if (!String(packageJson.version).startsWith('5.')) throw new Error('项目版本未升级到 v5');
+for (const [name, version] of Object.entries({ ...packageJson.dependencies, ...packageJson.devDependencies })) {
+  if (/^[~^*]|\bx\b/i.test(version)) throw new Error(`依赖 ${name} 没有固定版本：${version}`);
+}
+if (packageJson.dependencies?.archiver) throw new Error('不应残留未使用的 archiver 依赖');
+
+const sources = Object.fromEntries([
+  'html', 'frontend/index.html',
+  'main', 'frontend/src/main.js',
+  'state', 'frontend/src/state.js',
+  'api', 'frontend/src/api.js',
+  'picker', 'frontend/src/components/FilePicker.vue',
+  'newChat', 'frontend/src/views/NewChat.vue',
+  'history', 'frontend/src/views/HistoryPage.vue',
+  'detail', 'frontend/src/views/ChatDetail.vue',
+  'publicShare', 'frontend/src/views/PublicShare.vue',
+  'css', 'frontend/src/styles.css',
+  'app', 'server/app.js',
+  'auth', 'server/auth.js',
+  'runtimeConfig', 'server/config.js',
+  'db', 'server/db.js',
+  'storage', 'server/storage.js',
+  'archive', 'server/archive.js',
+  'worker', 'server/worker.js',
+  'provider', 'server/provider.js',
+  'prompts', 'server/prompts.js',
+  'cleanup', 'server/cleanup.js',
+  'filenames', 'server/filenames.js',
+  'readme', 'README.md',
+  'audit', 'AUDIT.md',
+  'dockerfile', 'Dockerfile',
+].reduce((result, item, index, all) => {
+  if (index % 2 === 0) result.push([item, read(all[index + 1])]);
+  return result;
+}, []));
+
+const checks = [
+  [sources.html.includes('viewport-fit=cover'), '缺少手机安全区 viewport 配置'],
+  [/type="file"[\s\S]*multiple/.test(sources.picker), '附件选择器没有开启多选'],
+  [!sources.picker.includes('accept='), '附件选择器不应限制文件类型'],
+  [sources.css.includes('100dvh'), '缺少手机动态视口支持'],
+  [sources.css.includes('safe-area-inset-bottom'), '缺少 iPhone 底部安全区支持'],
+  [sources.css.includes('@media (max-width: 767px)'), '缺少手机断点'],
+  [sources.css.includes('font-size: 16px'), '手机表单字号不足 16px'],
+  [sources.css.includes('min-height: 44px'), '主要触控区域未达到约 44px'],
+  [sources.css.includes('overflow-wrap: anywhere'), '长文件名或错误文字可能撑破小屏'],
+
+  [sources.main.includes("name: 'login'") && sources.main.includes('ensureAuthenticated'), '首页/提问页没有登录保护'],
+  [sources.main.includes("name: 'share'") && sources.main.includes("meta: { public: true"), '公开分享页没有免登录'],
+  [sources.state.includes('localStorage') || sources.api.includes('localStorage'), '登录 token 没有持久化到浏览器'],
+  [sources.auth.includes('timingSafeEqual'), '登录 token 没有恒定时间比较'],
+  [sources.auth.includes('HttpOnly') && sources.auth.includes('SameSite=Strict'), '登录 Cookie 安全属性不完整'],
+  [sources.db.includes('WHERE id=? AND owner_id=?') && sources.db.includes('WHERE owner_id=? ORDER BY created_at DESC'), '不同 token 的历史/详情没有 owner 隔离'],
+
+  [sources.app.includes("app.post('/api/chats/:id/turns'"), '缺少追问接口'],
+  [sources.app.includes("app.put('/api/chats/:id/turns/:turnNo'"), '缺少任意轮编辑接口'],
+  [sources.db.includes('CREATE TABLE IF NOT EXISTS turns') && sources.db.includes('PRIMARY KEY(chat_id, turn_no)'), 'SQLite 缺少逐轮索引表'],
+  [sources.db.includes('deleteTurnsAfter') && sources.db.includes('updateEditedTurn'), '编辑没有截断后续轮次'],
+  [sources.detail.includes('submitFollowUp') && sources.detail.includes('followFiles'), '前端追问缺少新附件上传'],
+  [sources.detail.includes('submitEdit(turn)') && sources.detail.includes('本轮附件不可编辑'), '前端任意轮编辑或附件锁定缺失'],
+  [sources.detail.includes("status: 'uploading'") && sources.newChat.includes('startPendingChat'), '点击提交后没有立即显示 pending 问题'],
+  [sources.detail.includes('thinking-dots') && sources.detail.includes('spinner'), 'pending 回答缺少加载动画'],
+
+  [sources.archive.includes("spawn('zip', ['-9', '-r'") && sources.archive.includes("'--', ...names"), '附件没有安全地执行 zip -9 -r'],
+  [sources.storage.includes('`${number}.zip`') && sources.storage.includes('attachmentBinPath(chatDir, chatId)'), '外层附件包没有按轮次保存 1.zip、2.zip…'],
+  [sources.storage.includes('completed = true') && sources.storage.includes('if (completed)'), '压缩失败时可能丢失原始附件'],
+  [sources.worker.includes('compressPendingTurnAttachments') && sources.worker.indexOf('compressPendingTurnAttachments') < sources.worker.indexOf('callProvider'), '模型调用前没有异步压缩附件'],
+  [sources.prompts.includes('这是一次用户的追问，内容是') && sources.prompts.includes('之前的提问/回答历史为'), '追问 prompt 格式不符合要求'],
+  [sources.prompts.includes('cat x.jpg att.zip > xa.jpg') && sources.provider.includes('cat x.jpg att.zip > xa.jpg'), '附图生成方式说明不一致'],
+  [sources.provider.includes("assets', 'x.jpg") && sources.provider.includes('concatenateBinarySources'), 'provider 图片没有按 x.jpg + att.zip 拼接'],
+  [sources.app.includes('/turns/:turnNo/attachments') && sources.app.includes('/api/public/shares/:shareToken/turns/:turnNo/attachments'), '私有或分享用户缺少逐轮附件下载'],
+  [sources.publicShare.includes('下载本轮全部附件') && sources.publicShare.includes('下载全部轮次附件'), '分享页面附件下载入口不完整'],
+  [sources.app.includes('附件仍在压缩，暂时不能下载'), '压缩完成前没有阻止附件下载'],
+
+  [sources.app.includes('if (adopted && id)') && !sources.app.includes('if (id) await deleteChatFiles(config.chatDir, id)'), '客户端 ID 碰撞可能误删已有对话'],
+  [sources.app.includes('edit-backup-') && sources.app.includes('restoreFiles'), '编辑操作缺少文件回滚保护'],
+  [sources.storage.includes('rewriteConversationText') && sources.storage.includes('truncateConversationArchive'), '编辑没有永久重写文字并截断附件'],
+  [sources.storage.includes("fsp.rm(textBinPath(chatDir, id)") && sources.storage.includes("fsp.rm(attachmentBinPath(chatDir, id)"), '删除/清理没有按对话删除两个永久 bin'],
+  [sources.cleanup.includes('3_000_000_000') && sources.cleanup.includes('7 * 24 * 60 * 60 * 1000') && sources.cleanup.includes('24 * 60 * 60 * 1000'), '自动清理阈值不符合 3GB/1天/7天要求'],
+  [sources.cleanup.includes('workers.cancelMany') && sources.cleanup.includes('deleteChatFiles'), '自动清理没有取消任务并彻底删除对话文件'],
+
+  [sources.app.includes('randomBytes(32).toString') && sources.app.includes('/api/public/shares/:shareToken'), '分享随机串不足 256 位或缺少公开接口'],
+  [sources.app.includes("app.use('/api', auth.requireAuth)"), '私有 API 没有统一要求登录'],
+  [sources.app.includes('strictTransportSecurity: false') && sources.app.includes('upgradeInsecureRequests: null'), '应用自身会阻止普通 HTTP 访问'],
+  [sources.provider.includes("target.protocol === 'https:' ? https : http"), '后端 provider 不同时支持 HTTP/HTTPS'],
+  [sources.app.includes('server.requestTimeout = 0') && sources.provider.includes('timeout: 0'), '长时间等待可能被服务器或 provider 请求超时中止'],
+  [sources.worker.includes('resetInterrupted') && sources.worker.includes('listUnfinishedTasks'), '服务重启后没有恢复未完成任务'],
+  [sources.provider.includes('formatProviderError') && sources.worker.includes('markFailed') && sources.detail.includes("turn.answer = payload.error || '模型调用失败'"), 'provider 错误原因没有代替回答'],
+  [sources.archive.includes('服务器缺少 zip 命令') && sources.dockerfile.includes('zip unzip'), 'zip/unzip 运行依赖没有声明'],
+  [sources.readme.includes('只运行一个应用实例'), 'README 缺少单实例约束'],
+  [sources.readme.includes('追问') && sources.readme.includes('编辑') && sources.readme.includes('1.zip'), 'README 没有说明多轮及附件格式'],
 ];
-for (const [ok, message] of assertions) if (!ok) throw new Error(message);
+for (const [ok, message] of checks) if (!ok) throw new Error(message);
 
-const frontendFiles = [];
-function collect(directory, matcher, destination) {
+const jpeg = fs.readFileSync(path.join(root, 'server/assets/x.jpg'));
+if (jpeg.length < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg.at(-2) !== 0xff || jpeg.at(-1) !== 0xd9) {
+  throw new Error('server/assets/x.jpg 不是完整 JPEG');
+}
+
+function collect(directory, matcher, output) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const full = path.join(directory, entry.name);
-    if (entry.isDirectory()) collect(full, matcher, destination);
-    else if (matcher.test(entry.name)) destination.push(full);
+    if (entry.isDirectory()) collect(full, matcher, output);
+    else if (matcher.test(entry.name)) output.push(full);
   }
 }
-collect(path.join(root, 'frontend'), /\.(?:vue|html)$/, frontendFiles);
-for (const file of frontendFiles) {
+
+const frontendTemplates = [];
+collect(path.join(root, 'frontend'), /\.(?:vue|html)$/, frontendTemplates);
+for (const file of frontendTemplates) {
   const source = fs.readFileSync(file, 'utf8');
   if (/\sstyle\s*=/.test(source)) throw new Error(`严格 CSP 下禁止内联 style：${path.relative(root, file)}`);
   if (file.endsWith('.vue')) {
@@ -172,32 +155,37 @@ for (const file of frontendFiles) {
     if (!match) throw new Error(`Vue 文件缺少 <script setup>：${path.relative(root, file)}`);
     const temporary = path.join(os.tmpdir(), `vue-check-${process.pid}-${Math.random().toString(16).slice(2)}.mjs`);
     fs.writeFileSync(temporary, match[1]);
-    try {
-      execFileSync(process.execPath, ['--check', temporary], { stdio: 'pipe' });
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+    try { execFileSync(process.execPath, ['--check', temporary], { stdio: 'pipe' }); }
+    finally { fs.rmSync(temporary, { force: true }); }
   }
 }
 
 const jsFiles = [];
 collect(path.join(root, 'server'), /\.(?:js|mjs)$/, jsFiles);
 collect(path.join(root, 'scripts'), /\.(?:js|mjs)$/, jsFiles);
-collect(path.join(root, 'frontend', 'src'), /\.js$/, jsFiles);
+collect(path.join(root, 'frontend/src'), /\.js$/, jsFiles);
 for (const file of jsFiles) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
 execFileSync('sh', ['-n', path.join(root, 'docker-entrypoint.sh')], { stdio: 'pipe' });
 
-const sqlitePath = path.join(root, 'chat', 'sqlite.db');
-const sqlite = new DatabaseSync(sqlitePath);
+const migrated = createDatabase(path.join(root, 'chat'), { legacyOwnerId: config.auth.users[0].id });
+migrated.close();
+const sqlite = new DatabaseSync(path.join(root, 'chat', 'sqlite.db'));
 try {
   const integrity = sqlite.prepare('PRAGMA integrity_check').get().integrity_check;
   if (integrity !== 'ok') throw new Error(`SQLite integrity_check 失败：${integrity}`);
-  const columns = new Set(sqlite.prepare('PRAGMA table_info(chats)').all().map((row) => row.name));
-  for (const column of ['owner_id', 'share_enabled', 'share_token']) {
-    if (!columns.has(column)) throw new Error(`SQLite 缺少迁移字段：${column}`);
+  const chatColumns = new Set(sqlite.prepare('PRAGMA table_info(chats)').all().map((row) => row.name));
+  for (const column of ['owner_id', 'share_enabled', 'share_token', 'turn_count', 'archive_version']) {
+    if (!chatColumns.has(column)) throw new Error(`SQLite chats 缺少字段：${column}`);
   }
+  const turnColumns = new Set(sqlite.prepare('PRAGMA table_info(turns)').all().map((row) => row.name));
+  for (const column of ['chat_id', 'turn_no', 'attachment_ready', 'task_token', 'revision']) {
+    if (!turnColumns.has(column)) throw new Error(`SQLite turns 缺少字段：${column}`);
+  }
+  const chatCount = Number(sqlite.prepare('SELECT COUNT(*) AS count FROM chats').get().count);
+  const turnCount = Number(sqlite.prepare('SELECT COUNT(*) AS count FROM turns').get().count);
+  if (chatCount !== 0 || turnCount !== 0) throw new Error('交付包中的初始 SQLite 必须为空');
 } finally {
   sqlite.close();
 }
 
-console.log(`静态检查通过：${required.length} 个关键文件，${jsFiles.length} 个 JavaScript 文件，${frontendFiles.length} 个前端模板。`);
+console.log(`静态检查通过：${required.length} 个关键文件，${jsFiles.length} 个 JavaScript 文件，${frontendTemplates.length} 个前端模板。`);

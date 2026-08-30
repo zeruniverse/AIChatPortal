@@ -105,7 +105,7 @@ test('流式回答超过配置字符上限时会停止', async () => {
   }
 });
 
-test('带附件请求的图片字节严格等于 a.jpg 后拼接附件包', async () => {
+test('带附件请求的图片字节严格等于 x.jpg 后拼接外层附件包', async () => {
   const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join, dirname } = await import('node:path');
@@ -135,11 +135,11 @@ test('带附件请求的图片字节严格等于 a.jpg 后拼接附件包', asyn
       onDelta: async () => {},
     });
     assert.equal(captured.messages[0].role, 'system');
-    assert.match(captured.messages[0].content, /cat a\.jpg all_att\.zip > xa\.jpg/);
+    assert.match(captured.messages[0].content, /cat x\.jpg att\.zip > xa\.jpg/);
     const dataUrl = captured.messages[1].content[1].image_url.url;
     const decoded = Buffer.from(dataUrl.split(',')[1], 'base64');
     const here = dirname(fileURLToPath(import.meta.url));
-    const carrier = await readFile(join(here, '..', 'server', 'assets', 'a.jpg'));
+    const carrier = await readFile(join(here, '..', 'server', 'assets', 'x.jpg'));
     assert.deepEqual(decoded, Buffer.concat([carrier, attachmentBytes]));
   } finally {
     await close(server);
@@ -197,6 +197,31 @@ test('SSE provider 错误直接保留错误原因', async () => {
         onDelta: async () => {},
       }),
       /provider 错误：insufficient credit（code: insufficient_credit）/,
+    );
+  } finally {
+    await close(server);
+  }
+});
+
+test('SSE 只有 DONE 而没有文本时按 provider 空回答报错', async () => {
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end('data: [DONE]\n\n');
+    });
+  });
+  const address = await listen(server);
+  try {
+    await assert.rejects(
+      callProvider({
+        config: configFor(`http://127.0.0.1:${address.port}/chat/completions`),
+        model,
+        prompt: 'hello',
+        hasAttachments: false,
+        onDelta: async () => {},
+      }),
+      /SSE 响应为空|没有可显示的文本/,
     );
   } finally {
     await close(server);

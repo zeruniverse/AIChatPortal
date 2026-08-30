@@ -41,7 +41,7 @@ async function load({ silent = false, append = false } = {}) {
 
 async function deleteAll() {
   if (!chats.value.length) return;
-  if (!window.confirm('确定删除全部问题、回答和附件吗？此操作无法撤销。')) return;
+  if (!window.confirm('确定删除全部对话、所有轮次回答和附件吗？此操作无法撤销。')) return;
   deleting.value = true;
   try {
     await apiFetch('/api/chats', { method: 'DELETE' });
@@ -66,7 +66,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer));
     <header class="page-heading history-heading">
       <div>
         <span class="eyebrow">HISTORY</span>
-        <h1>问题历史</h1>
+        <h1>对话历史</h1>
         <p>所有记录均保存在服务器的 chat 文件夹中。</p>
       </div>
       <button class="danger-button" type="button" :disabled="deleting || !chats.length" @click="deleteAll">
@@ -80,8 +80,8 @@ onBeforeUnmount(() => window.clearInterval(pollTimer));
     </div>
     <div v-else-if="!chats.length" class="empty-state">
       <span>⌁</span>
-      <h2>还没有问题</h2>
-      <p>提交第一个问题后，它会出现在这里。</p>
+      <h2>还没有对话</h2>
+      <p>开始第一个对话后，它会出现在这里。</p>
       <button class="primary-button" type="button" @click="router.push('/')">开始提问</button>
     </div>
     <template v-else>
@@ -96,6 +96,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer));
             <p>{{ chat.promptPreview }}</p>
             <div class="history-meta">
               <span>{{ chat.modelLabel }}</span>
+              <span>{{ chat.turnCount || 1 }} 轮</span>
               <span v-if="chat.hasAttachments">{{ chat.attachmentCount }} 个附件 · {{ formatBytes(chat.attachmentBytes) }}</span>
               <span v-if="chat.shared" class="shared-badge">已分享</span>
             </div>

@@ -149,3 +149,91 @@ test('按创建时间列出并批量删除记录', () => {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('追问按轮次追加；编辑任意轮会保留该轮附件元数据并删除之后所有轮次', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-db-turns-'));
+  const database = createDatabase(directory);
+  try {
+    const first = row('conversation-1', 'owner-a');
+    first.hasAttachments = 1;
+    first.attachmentCount = 2;
+    assert.equal(database.reserveChat(first, 10), true);
+    let turn = database.getTurn('conversation-1', 1);
+    assert.equal(database.markCompleted('conversation-1', 1, turn.taskToken), true);
+
+    let result = database.reserveFollowUp('conversation-1', 'owner-a', {
+      createdAt: '2026-08-30T01:00:00.000Z',
+      hasAttachments: 1, attachmentCount: 1, attachmentBytes: 123,
+      attachmentReady: 1, taskToken: 'turn-2-token', pendingDir: null,
+    }, 10);
+    assert.deepEqual(result, { ok: true, turnNo: 2 });
+    assert.equal(database.markCompleted('conversation-1', 2, 'turn-2-token'), true);
+
+    result = database.reserveFollowUp('conversation-1', 'owner-a', {
+      createdAt: '2026-08-30T02:00:00.000Z',
+      hasAttachments: 1, attachmentCount: 3, attachmentBytes: 456,
+      attachmentReady: 1, taskToken: 'turn-3-token', pendingDir: null,
+    }, 10);
+    assert.deepEqual(result, { ok: true, turnNo: 3 });
+    assert.equal(database.markCompleted('conversation-1', 3, 'turn-3-token'), true);
+
+    const edited = database.editTurn('conversation-1', 'owner-a', 2, {
+      createdAt: '2026-08-30T01:00:00.000Z',
+      taskToken: 'turn-2-edited-token',
+      title: '不应修改首轮标题',
+      promptPreview: '第二轮编辑后内容',
+    }, 10);
+    assert.equal(edited.ok, true);
+    const conversation = database.getOwnedConversation('conversation-1', 'owner-a');
+    assert.deepEqual(conversation.turns.map((item) => item.turnNo), [1, 2]);
+    assert.equal(conversation.turns[1].status, 'queued');
+    assert.equal(conversation.turns[1].attachmentReady, true);
+    assert.equal(conversation.turns[1].attachmentCount, 1);
+    assert.equal(conversation.turns[1].attachmentBytes, 123);
+    assert.equal(conversation.chat.turnCount, 2);
+    assert.equal(conversation.chat.attachmentCount, 3);
+    assert.equal(conversation.chat.title, 'conversation-1');
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('上一轮附件未成功压缩时拒绝继续追问，避免后续归档静默缺轮', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-db-attachment-gate-'));
+  const database = createDatabase(directory);
+  try {
+    const taskToken = 'first-task-token';
+    assert.equal(database.reserveInitial({
+      chat: {
+        ...row('attachment-gate', 'owner-a'),
+        archiveVersion: 2,
+      },
+      turn: {
+        chatId: 'attachment-gate', turnNo: 1,
+        createdAt: '2026-08-30T00:00:00.000Z',
+        hasAttachments: 1, attachmentCount: 1, attachmentBytes: 0,
+        attachmentReady: 0, taskToken, pendingDir: '/tmp/pending',
+      },
+    }, 10), true);
+    assert.equal(database.markFailed('attachment-gate', 1, taskToken, '压缩失败'), true);
+
+    let result = database.reserveFollowUp('attachment-gate', 'owner-a', {
+      createdAt: '2026-08-30T01:00:00.000Z',
+      hasAttachments: 0, attachmentCount: 0, attachmentBytes: 0,
+      attachmentReady: 0, taskToken: 'turn-2-token', pendingDir: null,
+    }, 10);
+    assert.deepEqual(result, { ok: false, reason: 'attachment_not_ready' });
+
+    assert.equal(database.markAttachmentReady('attachment-gate', 1, taskToken, 123), true);
+    result = database.reserveFollowUp('attachment-gate', 'owner-a', {
+      createdAt: '2026-08-30T01:00:00.000Z',
+      hasAttachments: 0, attachmentCount: 0, attachmentBytes: 0,
+      attachmentReady: 0, taskToken: 'turn-2-token', pendingDir: null,
+    }, 10);
+    assert.deepEqual(result, { ok: true, turnNo: 2 });
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

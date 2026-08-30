@@ -1,5 +1,6 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { deleteChatFiles } from './storage.js';
 
 export const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 export const MAX_CHAT_STORAGE_BYTES = 3_000_000_000;
@@ -32,12 +33,6 @@ async function directorySize(directory) {
   return total;
 }
 
-async function removeChatFiles(chatDir, id) {
-  await Promise.all([
-    fsp.rm(path.join(chatDir, `${id}.text.bin`), { force: true }),
-    fsp.rm(path.join(chatDir, `${id}.attachments.bin`), { force: true }),
-  ]);
-}
 
 export async function getChatStorageBytes(chatDir) {
   return directorySize(chatDir);
@@ -92,7 +87,7 @@ export class StorageCleanup {
 
         await this.workers.cancelMany(ids, 'deleted');
         deletedTotal += this.database.deleteInternalIds(ids);
-        const results = await Promise.allSettled(ids.map((id) => removeChatFiles(this.chatDir, id)));
+        const results = await Promise.allSettled(ids.map((id) => deleteChatFiles(this.chatDir, id)));
         results.forEach((result, index) => {
           if (result.status === 'rejected') {
             this.logger.error(`[cleanup] failed to remove files for ${ids[index]}`, result.reason);

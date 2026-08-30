@@ -19,3 +19,7 @@ test('ZIP 文件名会清理危险字符、限制长度并处理重名', () => {
   assert.ok(Array.from(names[2]).length <= 180);
   assert.ok(names[2].endsWith('.log'));
 });
+
+test('以连字符开头的文件名不会被 ZIP 命令解释为参数', () => {
+  assert.equal(safeZipName('-T'), '_-T');
+});

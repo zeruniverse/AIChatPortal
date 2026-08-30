@@ -21,6 +21,8 @@ export function safeZipName(input, fallback = 'attachment') {
     .replace(/[. ]+$/g, '');
 
   if (!safe || safe === '.' || safe === '..') safe = fallback;
+  // Keep command-line ZIP tools from treating a user filename as an option.
+  if (safe.startsWith('-')) safe = `_${safe}`;
 
   const extension = path.extname(safe);
   const stem = path.basename(safe, extension) || fallback;

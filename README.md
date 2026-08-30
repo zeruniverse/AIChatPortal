@@ -1,68 +1,140 @@
-# OpenAI-compatible 单轮问答 Web App
+# OpenAI-compatible 多轮问答 Web App
 
-这是一个可直接用 Docker 部署的单轮问答应用：Node.js + Express 后端，Vue 3 + Vite 前端。应用页面可以通过普通 HTTP 访问，后端可连接 HTTP 或 HTTPS 的 OpenAI-compatible `chat/completions` provider。
+这是一个可直接部署的 Node.js + Express 后端、Vue 3 + Vite 前端的多轮问答应用。浏览器页面可以使用普通 HTTP，后端可以连接 HTTP 或 HTTPS 的 OpenAI-compatible `chat/completions` provider。
 
-所有业务数据都在 `chat/` 目录中，不依赖 MySQL、PostgreSQL、Redis 或其他外部数据库服务。SQLite 仅作为本地索引使用；每个问题始终对应一个文字 bin 和一个附件 bin。
+应用不依赖外部数据库服务。所有业务数据都保存在 `chat/` 目录：SQLite 只保存索引和状态；每个对话永久只保留一个文字 bin 和一个附件 bin。
 
-## 功能清单
+## 主要功能
 
-- `config.json` 中配置恰好 4 个模型。
-- `config.json` 中配置多个登录用户，每个用户直接使用一个 token 登录。
-- token 登录后写入长期签名 HttpOnly Cookie，同时保存在浏览器 localStorage；关闭浏览器后仍可恢复登录。
-- 不同 token 对应不同用户 ID，历史列表、详情、附件、删除和分享操作互相隔离。
-- 支持提交时开启公开分享，也可在问题详情页随时开启或关闭。
-- 分享地址使用 32 个密码学随机字节生成，即 256 位随机性、43 个 Base64URL 字符。
-- 获得分享链接的人无需登录即可查看问题和实时回答，也能下载该问题的全部附件 ZIP。
-- 关闭分享或删除问题后，原分享链接立即失效。
-- 后端任务独立于浏览器连接；关闭页面不会停止 provider 请求。
-- provider 最慢数小时才返回首 token 时，后端仍会继续等待。
-- provider 调用失败时，提取并脱敏实际错误原因，直接用错误内容替代回答显示；例如 `insufficient credit`。
-- 服务重启后，未完成任务会重新排队并重新调用 provider。
-- 全系统最多 10 个上传中、排队中或运行中的任务。
-- 自动清理：启动时和每 10 分钟检查一次，始终删除创建超过 7 天的问题；`chat/` 总占用超过 3,000,000,000 字节时，删除创建超过 24 小时的全部问题。
-- 不支持追问；每次提交都是一个独立问题。
-- 支持任意附件类型和多文件上传。
-- 所有附件压缩后的 ZIP 不得超过 `70,000,000` 字节。
-- 附件只能整包下载，不提供单文件下载 API。
-- 对 provider 的附件提交严格等价于：
+- `config.json` 中必须且只能配置 4 个模型。
+- 可配置多个登录 token；每个 token 对应一个独立用户，不同用户的历史、详情、附件和删除操作互不可见。
+- 登录 token 保存在浏览器 localStorage，并由长期签名 HttpOnly Cookie 维持会话；不清除站点数据即可持续使用。
+- 点击提交后立即进入 `/chat/<uuid>`，前端立即显示问题和 pending 动画；附件上传被服务器完整接收后，压缩和 provider 调用均由服务器后台继续，关闭浏览器不会中止已保存任务。
+- 支持多轮追问，每次追问都可以上传新的任意类型附件。
+- 支持编辑任意一次提问；附件不可修改。提交编辑后，该轮旧回答和所有后续轮次的提问、回答、附件都会永久删除，然后从被编辑轮重新生成。
+- provider 最慢数小时返回首 token 时仍会持续等待；Node 和 provider 请求超时均关闭。
+- 服务重启后，未完成任务会重新排队并从头调用 provider。
+- 全系统最多 10 个上传中、排队中、压缩中或调用 provider 的任务。
+- provider 调用失败时，脱敏后的实际错误原因直接替代回答，例如 `insufficient credit`。
+- 支持公开分享；分享链接使用 32 字节密码学随机数，即 256 位随机性和 43 个 Base64URL 字符。
+- 分享链接无需登录，可查看全部轮次，并下载每轮附件或全部轮次附件。
+- 支持手机和小屏幕：原生多文件选择、上传进度、安全区、动态视口、16px 表单字号、触控尺寸、长文件名换行、代码块和表格横向滚动。
+- 自动清理：始终删除 7 天前的对话；`chat/` 总占用超过 3,000,000,000 字节时，额外删除 24 小时前的对话。
 
-```bash
-cat a.jpg all_att.zip > xa.jpg
-```
-
-- 前端采用移动优先布局，支持小屏幕、刘海安全区、动态视口、多附件选择、逐个删除、上传进度、长文件名换行、代码块和表格横向滚动。
-
-## 数据目录
-
-运行后数据位于：
+## 数据结构
 
 ```text
 chat/
 ├── sqlite.db
-├── <chat-id>.text.bin
-└── <chat-id>.attachments.bin
+├── <conversation-id>.text.bin
+└── <conversation-id>.attachments.bin
 ```
 
-说明：
+每个对话永久只保留这两个 bin：
 
-- `sqlite.db` 保存问题索引、所属用户 ID、状态和分享状态。
-- `<chat-id>.text.bin` 是 JSON Lines，保存问题、回答分片和任务事件。
-- `<chat-id>.attachments.bin` 是标准 ZIP 文件，只是使用 `.bin` 扩展名。
-- 没有附件的问题也会创建一个合法的空 ZIP，因此每个问题始终有两个 bin。
-- SQLite 使用 `DELETE` journal 模式，避免长期保留 `sqlite.db-wal` 和 `sqlite.db-shm`。
-- 上传临时文件位于 `chat/.uploads/`，完成、失败或服务重启时会清理。
-- 自动清理统计整个 `chat/` 目录的实际文件字节，包括 SQLite、两个 bin 和尚未完成的上传临时文件。
+- `<conversation-id>.text.bin`：JSON Lines，保存所有轮次的用户问题、回答分片、错误和任务事件。
+- `<conversation-id>.attachments.bin`：标准 ZIP，只是扩展名为 `.bin`。它是外层 ZIP，内部按轮保存 `1.zip`、`2.zip`、`3.zip`……。
+- 每个编号 ZIP 保存对应轮次上传的全部附件。某轮没有附件时，也会在外层 ZIP 中保留一个合法的空编号 ZIP。
+- 没有任何附件的对话仍会创建合法附件 bin，从而保证每个对话始终有两个 bin。
+- `sqlite.db` 保存用户归属、对话索引、每轮状态、分享状态和附件压缩状态，不保存登录 token 原文。
 
-## 配置
+压缩过程中可能短暂使用：
 
-复制或修改 `config.json`：
+```text
+chat/.uploads/
+chat/.pending/
+chat/.work/
+chat/.downloads/
+```
+
+这些都是临时目录，不是持久对话格式。压缩成功后会清除对应原始上传；如果压缩失败或被编辑操作取消，会暂时保留该轮原始附件，以便同一轮重新提交时不静默丢失。删除对话、自动清理或确认不再需要时会连同这些临时数据一起永久删除。临时目录同样计入 3GB 自动清理阈值。
+
+## 附件处理与 provider 格式
+
+每一轮提交后，后端异步执行等价于：
+
+```bash
+zip -9 -r <轮次>.zip <该轮全部附件>
+```
+
+然后把所有轮次 ZIP 再打成一个外层 ZIP：
+
+```text
+att.zip
+├── 1.zip
+├── 2.zip
+├── 3.zip
+└── ...
+```
+
+外层 ZIP 的实际大小不得超过：
+
+```text
+70,000,000 bytes
+```
+
+只有外层 ZIP 原子写入完成后，该轮附件才会变成可下载状态。压缩期间问题已经出现在页面，但附件下载接口返回“仍在压缩”。
+
+向 provider 发送附件时，图片字节严格等价于：
+
+```bash
+cat x.jpg att.zip > xa.jpg
+```
+
+后端不会把全部内容一次性读入内存，而是连续流式读取 `x.jpg` 和 `<conversation-id>.attachments.bin` 后进行 Base64 编码。追问 prompt 会包含：
+
+```text
+这是一次用户的追问，内容是 {当前追问内容}，如果有附图，附图是一个
+cat x.jpg att.zip > xa.jpg 生成的图片，你应该先解压出附件。
+附件内部是多个zip，1.zip是用户第一次提问时的附件打包zip，
+2.zip是第二次提问时的附件打包zip，以此类推，之前的提问/回答历史为：
+
+第一次提问：
+...
+第一次回答：
+...
+第二次提问：
+...
+```
+
+同时还会增加独立 system message，说明 JPEG 结束标记后包含外层 ZIP，以及无法读取时不得臆测附件内容。
+
+### 兼容性限制
+
+JPEG 尾随 ZIP 是 polyglot 传输方式。很多 provider 会解码或重新编码图片，只把像素交给模型，导致 JPEG 结束标记后的 ZIP 被丢弃。该功能只有在 provider 能访问原始图片字节并读取尾随数据时才可靠。
+
+70,000,000 字节的 ZIP 转为 Base64 后约为 93.3MB，加上 JSON 后还会更大。provider、反向代理、CDN、WAF 和出口代理都必须允许相应请求体大小。
+
+## 多轮追问
+
+当前轮回答完成或 provider 调用失败，并且该轮附件包已经成功形成后，详情页会出现追问输入框。若附件压缩本身失败，为避免后续外层 ZIP 静默缺少该轮，系统会阻止继续追问；此时只能编辑该轮重试或删除整个对话。每次追问：
+
+1. 可以重新选择任意类型、多个附件。
+2. 页面先乐观加入新问题并显示上传/压缩/pending 状态。
+3. 上传完成后，服务器在后台压缩本轮附件并更新总附件 bin。
+4. provider 收到当前追问、之前全部问答历史，以及截至当前轮的外层附件 ZIP。
+5. 一个对话同一时间只处理一轮，以确保追问历史包含前一轮最终回答。
+
+## 编辑任意一次提问
+
+每个用户问题旁都有“编辑”按钮。编辑时：
+
+- 原问题会变成预填输入框。
+- 原附件不可新增、删除或替换。
+- “取消”不会修改任何数据。
+- “提交编辑”会取消该轮及后续正在进行的任务。
+- 该轮旧回答以及所有后续轮次的提问、回答、SQLite 索引、编号 ZIP 和临时文件都会永久删除。
+- 被编辑轮原附件会保留，然后该轮相当于重新提交并重新调用 provider。
+- 编辑第一轮时会同步更新历史列表标题。
+
+编辑操作采用对话级互斥和原子附件 ZIP 替换，避免只删 SQLite、未删附件，或只删附件、未删文字的半完成状态。
+
+## 登录与用户隔离
+
+示例配置：
 
 ```json
 {
-  "listen": {
-    "host": "0.0.0.0",
-    "port": 3000
-  },
   "auth": {
     "sessionSecret": "请替换为至少32字符的高强度随机字符串",
     "cookieSecure": false,
@@ -75,13 +147,115 @@ chat/
       {
         "id": "bob",
         "label": "Bob",
-        "token": "另一个不可猜测且不重复的登录token"
+        "token": "另一个不重复的登录token"
       }
+    ]
+  }
+}
+```
+
+- `id` 是稳定内部标识，只允许字母、数字、点、下划线和连字符。
+- `token` 至少 16 字符，建议使用 32 字节以上随机值。
+- `sessionSecret` 至少 32 字符。
+- 程序会拒绝使用包内 `replace-with-...` 示例凭据启动。
+- 更换某个用户的 token 会使该用户旧 Cookie 失效。
+- 更换 `sessionSecret` 会使全部旧 Cookie 失效。
+- 普通 HTTP 部署必须设置 `cookieSecure: false`；全站 HTTPS 才设置为 `true`。
+
+生成随机值：
+
+```bash
+openssl rand -base64 32
+openssl rand -base64 48
+```
+
+纯 HTTP 不提供传输加密。同一网络中的中间设备可能看到登录 token、问题、回答和附件。公网部署建议在反向代理层使用 HTTPS；必须使用 HTTP 时，应限制在可信内网或 VPN。
+
+## 分享
+
+私有页面：
+
+```text
+/chat/<uuid>
+```
+
+公开页面：
+
+```text
+/share/<43字符随机串>
+```
+
+分享页面无需登录，可以：
+
+- 查看全部提问和回答。
+- 实时查看仍在生成的回答。
+- 下载任意已压缩完成轮次的完整附件 ZIP。
+- 下载包含全部编号轮次 ZIP 的总附件包。
+
+关闭分享或删除/自动清理整个对话后，公开详情、SSE 和所有附件下载链接立即失效。分享链接本身是访问凭证，请勿泄露给不应访问内容的人。
+
+## Provider 错误显示
+
+后端解析常见 OpenAI-compatible 错误字段：
+
+```text
+error.message
+error.detail
+error.error_description
+error.type
+error.code
+```
+
+例如：
+
+```text
+provider HTTP 402：insufficient credit（type: payment_required；code: insufficient_credit）
+```
+
+错误会直接作为该轮回答显示，并写入文字 bin 和 SQLite 状态。即使 provider 先返回部分文字后失败，最终也会以错误原因替换不完整回答。provider key、Authorization、敏感额外 header 和 URL 中的 token 会在写入前脱敏。
+
+## 自动清理
+
+自动清理在以下时机运行：
+
+```text
+服务启动时
+服务运行期间每 10 分钟
+```
+
+规则：
+
+1. 无论磁盘占用多少，永久删除创建超过 7×24 小时的所有对话。
+2. 若整个 `chat/` 目录在本轮检查开始时严格超过 `3,000,000,000` 字节，再永久删除创建超过 24 小时的所有对话。
+
+清理以整个对话为单位，会一起删除：
+
+- SQLite 中的对话和全部轮次记录。
+- 整个文字 bin。
+- 整个附件 bin，包含所有 `1.zip、2.zip…`。
+- 该对话所有 pending/work/download 临时文件。
+- 排队、压缩中和 provider 请求中的任务。
+- 分享 token、公开页面和附件下载权限。
+
+有删除发生后会执行 SQLite `VACUUM`。如果不足 24 小时的新对话本身已超过 3GB，程序不会删除这些新对话，所以目录可能暂时仍高于阈值。
+
+## 配置文件
+
+完整示例见 `config.example.json`：
+
+```json
+{
+  "listen": { "host": "0.0.0.0", "port": 3000 },
+  "auth": {
+    "sessionSecret": "replace-with-a-random-session-secret-at-least-32-characters",
+    "cookieSecure": false,
+    "users": [
+      { "id": "user-1", "label": "用户一", "token": "replace-with-user-1-token-at-least-16-characters" }
     ]
   },
   "provider": {
-    "url": "https://provider.example.com/v1/chat/completions",
-    "key": "provider-key",
+    "url": "https://api.example.com/v1/chat/completions",
+    "key": "replace-with-provider-key",
     "extraHeaders": {},
     "systemPrompt": ""
   },
@@ -103,215 +277,59 @@ chat/
 }
 ```
 
-### 登录用户配置
+`model.request` 可加入 provider 支持的额外字段，例如 `temperature`、`max_tokens` 等。程序最终会强制设置当前模型 ID、`messages` 和 `stream: true`。
 
-`auth.users` 至少有一个用户。每项包括：
 
-- `id`：稳定的内部用户标识，仅允许字母、数字、点、下划线和连字符；不要随意修改。
-- `label`：前端显示名称。
-- `token`：用户在登录页输入的秘密 token，至少 16 字符，建议使用 32 字节以上随机值。
+## 从 v4 升级
 
-可用以下命令生成 token 和 session secret：
+升级前先停止旧容器，并备份原来的 `config.json` 与整个 `chat/` 目录。然后用本版本源码替换应用代码，继续挂载原来的 `chat/`：
 
 ```bash
-openssl rand -base64 32
-openssl rand -base64 48
-```
-
-`auth.sessionSecret` 用于签名长期登录会话，至少 32 字符。更换它会使现有登录 Cookie 失效，但浏览器 localStorage 中仍保存有效登录 token 时，页面会自动重新登录。会话还绑定当前配置中的 token 指纹：更换某个用户的 token 会立即使该用户旧 Cookie 失效；旧 localStorage token 也无法重新登录。
-
-`auth.cookieSecure`：
-
-- 普通 HTTP 部署必须设为 `false`。
-- 全站 HTTPS 部署可设为 `true`。
-- 设为 `true` 后，浏览器不会在 HTTP 连接发送登录 Cookie。
-
-也可使用环境变量 `SESSION_SECRET` 覆盖 `auth.sessionSecret`，使用 `PROVIDER_KEY` 覆盖 provider key。程序会拒绝使用包内公开的 `replace-with-...` 示例 token 或 session secret 启动，避免误把默认凭据部署到公网。
-
-### 旧版本数据迁移
-
-旧包中没有 `owner_id` 的记录在首次启动时会自动归属给 `auth.users` 的第一个用户。迁移后不要随意更改该用户的 `id`，否则旧记录不会出现在新的用户历史中。
-
-## HTTP 部署
-
-应用自身监听普通 HTTP：
-
-先把 `config.json` 中所有 `replace-with-...` 示例值替换掉，再运行：
-
-```bash
-mkdir -p chat
+docker compose down
+cp -a chat chat.backup-before-v5
 docker compose up -d --build
 ```
 
-浏览器访问：
+启动时会自动为旧 SQLite 增加多轮 `turns` 索引。旧版每个问题的单层附件 ZIP 会按第一轮附件继续提供下载；首次追问或编辑需要用到附件时，系统会把它升级为外层 `1.zip` 结构。不要让 v4 与 v5 进程同时挂载同一个 `chat/` 目录。
+
+## Docker 部署
+
+先复制并修改配置：
+
+```bash
+cp config.example.json config.json
+mkdir -p chat
+```
+
+替换全部 `replace-with-...` 值，然后运行：
+
+```bash
+docker compose up -d --build
+```
+
+访问：
 
 ```text
 http://服务器地址:3000
 ```
 
-后端的 provider URL 可以同时配置为 HTTPS，例如：
-
-```text
-https://api.example.com/v1/chat/completions
-```
-
-应用已关闭 HSTS 响应和 CSP 的 `upgrade-insecure-requests`，因此不会把普通 HTTP 页面强制升级为 HTTPS。
-
-纯 HTTP 会让同一网络中的中间设备有机会读取登录 token、问题、回答和附件。公网部署仍建议使用 HTTPS 反向代理；必须使用 HTTP 时，应限制在可信内网、VPN 或受控网络。
-
-## 分享行为
-
-提问页有“开启公开分享”复选框。提交成功后页面总是进入私有问题地址：
-
-```text
-/chat/<uuid>
-```
-
-开启分享后会生成：
-
-```text
-/share/<43字符随机串>
-```
-
-该链接：
-
-- 不要求登录。
-- 可查看问题、模型回答和实时生成状态。
-- 有附件时可下载全部附件，下载结果为一个完整附件 ZIP。
-- 不提供删除、修改、关闭分享等权限。
-- 关闭分享或删除问题后立即返回不可用。
-
-分享随机串具有 256 位随机性，无法通过顺序枚举合理猜测。但它本质上是访问凭证：不要把链接发给不应访问内容的人，也不要在公开论坛或分析系统中泄露完整 URL。
-
-## Provider 错误显示
-
-调用 provider 失败时，错误不会只显示成通用的“生成失败”。后端会优先从 OpenAI-compatible 错误结构中提取：
-
-- `error.message`
-- `error.detail`
-- `error.error_description`
-- `error.type`
-- `error.code`
-
-例如 provider 返回：
-
-```json
-{
-  "error": {
-    "message": "insufficient credit",
-    "type": "payment_required",
-    "code": "insufficient_credit"
-  }
-}
-```
-
-回答区域会直接显示：
-
-```text
-provider HTTP 402：insufficient credit（type: payment_required；code: insufficient_credit）
-```
-
-适用于非 2xx HTTP 响应、SSE 中的 `error`、普通 JSON 中的 `error`，以及连接、DNS、TLS 等网络错误。即使 provider 已返回了一部分文字后再失败，最终页面也会以错误原因替换不完整回答。错误会写入 `.text.bin` 和 SQLite 状态字段，并在刷新或 SSE 重连后保持一致。
-
-显示前会移除配置中的 provider key、敏感额外 header 值及 provider URL 中的敏感 token。公开分享页同样会显示这条脱敏错误；因此分享链接持有者可能看到 provider 的状态码、错误类型、额度不足等诊断信息，但不会显示已识别的密钥值。
-
-## 自动清理
-
-自动清理在服务启动、以及服务运行期间每 10 分钟执行一次。年龄按问题的 `created_at` 计算：
-
-1. 无论当前占用多少，删除创建时间超过 7×24 小时的所有问题。
-2. 每次检查开始时，如果整个 `chat/` 目录实际占用严格大于 `3,000,000,000` 字节，再删除创建时间超过 24 小时的所有问题。
-
-删除范围包括所有登录 token 所属用户，且会同步处理：
-
-- SQLite 索引记录。
-- `<chat-id>.text.bin`。
-- `<chat-id>.attachments.bin`。
-- 正在排队或调用 provider 的旧任务。
-- 已开启的公开分享链接和公开附件下载权限。
-- 已连接的私有或公开 SSE 页面；页面会收到记录已删除事件。
-
-清理完成后会执行 SQLite `VACUUM` 以回收索引文件空间，并在服务日志中记录删除数量和清理前后的字节数。若 24 小时以内的新问题本身已超过 3GB，程序不会删除这些不足 24 小时的问题，因此目录仍可能暂时高于阈值；下一次检查仍会继续判断。
-
-这里的“3GB”按十进制字节解释，即 `3,000,000,000` 字节，不是 `3 GiB`。
-
-## 长时间 provider 请求
-
-后端使用 Node.js `http`/`https` 客户端直接连接 provider，并设置请求超时为 0。创建任务后，provider 请求由服务器 Worker 继续执行，不依赖浏览器页面或 SSE 连接。
-
-浏览器关闭后：
-
-- 上传已经完成并收到问题 ID：任务继续运行。
-- 上传尚未完成：此次提交不会创建任务。
-- 重新打开问题 URL：从 `.text.bin` 恢复已有回答，然后继续接收新分片。
-
-服务进程重启会断开原 provider TCP 连接。启动时，原 `running` 任务会恢复为 `queued`，然后从头重新请求 provider；这可能导致 provider 侧重复计费。
-
-## 附件传输格式和兼容性限制
-
-服务器先把所有附件压缩为 ZIP，再把字节流构造成：
-
-```text
-[a.jpg 的完整字节][all_att.zip 的完整字节]
-```
-
-随后以 `data:image/jpeg;base64,...` 的 OpenAI-compatible `image_url` 形式提交。系统提示会告诉模型该图片由以下方式生成：
+日志：
 
 ```bash
-cat a.jpg all_att.zip > xa.jpg
+docker compose logs -f
 ```
 
-重要限制：很多 provider 会解码或重新编码 JPEG，只把像素发送给模型，并丢弃 JPEG EOI 后面的 ZIP 数据。这种 provider 无法读取附件，即使请求格式本身正确。使用前必须确认 provider 能访问原始图片字节及 JPEG 尾随数据。
+健康检查：
 
-70,000,000 字节 ZIP 经过 Base64 后约为 93.3 MB，JSON 请求会略大。provider、反向代理、WAF 和出口代理都必须允许至少约 95 MB 的请求体。
-
-## 反向代理注意事项
-
-即使浏览器断开也不会停止后台任务，但反向代理仍应允许大文件上传：
-
-```nginx
-client_max_body_size 520m;
-proxy_request_buffering off;
-proxy_buffering off;
-proxy_read_timeout 2h;
+```text
+http://服务器地址:3000/api/health
 ```
 
-公开分享和私有问题页面使用 SSE 获取实时结果；禁用响应缓冲能更及时地显示 token。SSE 断开不会影响服务器后台任务。
-
-## 单实例要求
-
-**只运行一个应用实例。**
-
-不要使用以下部署方式：
-
-- PM2 cluster。
-- Node cluster。
-- 多个 Docker 副本共享同一个 `chat/`。
-- 多台服务器同时挂载同一个 SQLite 文件。
-
-Worker 队列在单个 Node 进程内维护。多实例会造成任务重复执行、删除竞争或文件写入冲突。
-
-## 手机和小屏幕支持
-
-已针对 320px 以上宽度设计，重点包括：
-
-- `viewport-fit=cover` 和 `env(safe-area-inset-*)`。
-- `100dvh`，适配手机地址栏动态高度。
-- 移动端固定顶部栏和底部导航，不遮挡正文或提交按钮。
-- 登录框、模型选择、问题输入和分享链接输入使用至少 16px 字号，避免 iOS 聚焦自动放大。
-- 主要触控按钮和附件删除按钮至少约 44px。
-- 原生多文件选择器，不设置 `accept`，允许系统文件 App 中的任意类型。
-- 选中文件可逐个移除或全部清空。
-- 长文件名、长问题和 provider 错误会换行，不撑破页面。
-- Markdown 代码块和表格可独立横向滚动。
-- 分享控制在 390px 以下改成单列，公开附件下载按钮占满宽度。
-- 深色模式和减少动画偏好。
-
-移动系统最终允许选择哪些位置和文件，仍受 iOS、Android 和浏览器自身权限限制。
+Docker runtime 已安装 `zip` 和 `unzip`。应用页面可以通过 HTTP 访问，provider 可配置为 HTTPS。应用关闭了 HSTS 和 CSP `upgrade-insecure-requests`，不会自行把 HTTP 页面强制升级到 HTTPS。
 
 ## 本地运行
 
-要求 Node.js 24 或更高版本：
+需要 Node.js 24、Info-ZIP `zip` 和 `unzip`：
 
 ```bash
 npm install
@@ -319,26 +337,35 @@ npm run build
 npm start
 ```
 
-开发模式：
-
-```bash
-npm install
-npm run dev
-```
-
-运行检查：
+完整验证：
 
 ```bash
 npm run verify
 ```
 
-## 安全提示
 
-- 首次部署必须替换示例登录 token、`sessionSecret` 和 provider key。
-- 不要把真实 `config.json` 提交到公开代码仓库。
-- 登录 token 会保存在浏览器 localStorage，以实现长期恢复登录；共享设备上应主动退出并清除站点数据。
-- 分享链接等同于只读访问凭证，持有者可以下载附件。
-- Markdown 输出经过受限渲染，不允许原始 HTML。
-- ZIP 文件名会移除路径穿越和危险字符。
-- provider 返回的错误会隐藏配置中的 provider key 和敏感 header；私有页和公开分享页都会显示脱敏后的实际错误原因。分享前应确认可以向链接持有者公开这些诊断信息。
-- 本应用没有注册、找回密码、速率限制或公网防爆破服务；公网应在反向代理、防火墙或 VPN 层增加访问控制和限速。
+## 本包审计结果
+
+当前交付源码已实际完成：
+
+- Node 核心自动化测试 `42 / 42` 通过。
+- 另有 1 项覆盖登录、首问、追问、分享附件下载和编辑截断的完整 HTTP 联调测试；它会在安装 npm 依赖后自动启用。本次执行环境因 npm registry 连接超时而跳过该项。
+- 静态检查通过：32 个关键文件、21 个 JavaScript 文件、10 个 Vue/HTML 模板。
+- CSS 使用解析器检查，0 个语法错误。
+- SQLite `integrity_check` 为 `ok`，交付库的对话和轮次记录均为 0。
+- 真实 `zip/unzip` 测试验证外层 `1.zip、2.zip…`、逐轮下载、编辑截断和整段对话删除。
+
+当前执行环境没有 Docker 命令，且 `npm install` 因 registry 连接超时未完成，因此没有在此环境声称完成 Vite 生产构建或 Docker 镜像启动。联网部署机执行 `docker compose up -d --build` 时会安装固定版本依赖并构建前端。
+
+## 单实例限制
+
+必须只运行一个应用实例。不要使用：
+
+```text
+PM2 cluster
+Node cluster
+多个同时挂载同一个 chat/ 目录的容器
+多台服务器共享同一个 sqlite.db
+```
+
+SQLite、对话级任务队列和附件 bin 原子替换按单进程设计。多实例共享目录可能造成重复调用 provider 或附件更新互相覆盖。

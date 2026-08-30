@@ -26,11 +26,11 @@ async function signOut() {
     <aside v-if="privateLayout" class="desktop-sidebar" aria-label="主导航">
       <RouterLink class="brand" to="/" aria-label="模型问答首页">
         <span class="brand-mark">M</span>
-        <span><strong>模型问答</strong><small>单轮 · 本地存储</small></span>
+        <span><strong>模型问答</strong><small>多轮 · 本地存储</small></span>
       </RouterLink>
       <nav class="sidebar-nav">
-        <RouterLink to="/" exact-active-class="active"><span>＋</span>新问题</RouterLink>
-        <RouterLink to="/history" active-class="active"><span>⌕</span>问题历史</RouterLink>
+        <RouterLink to="/" exact-active-class="active"><span>＋</span>新对话</RouterLink>
+        <RouterLink to="/history" active-class="active"><span>⌕</span>对话历史</RouterLink>
       </nav>
       <div class="sidebar-account">
         <strong>{{ appState.user?.label }}</strong>
@@ -58,7 +58,7 @@ async function signOut() {
     </main>
 
     <nav v-if="privateLayout" class="mobile-nav" aria-label="移动端主导航">
-      <RouterLink to="/" exact-active-class="active"><span>＋</span><small>新问题</small></RouterLink>
+      <RouterLink to="/" exact-active-class="active"><span>＋</span><small>新对话</small></RouterLink>
       <RouterLink to="/history" active-class="active"><span>⌕</span><small>历史</small></RouterLink>
     </nav>
   </div>
