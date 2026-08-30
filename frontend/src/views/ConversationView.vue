@@ -49,9 +49,9 @@ async function toggleShare() {
   try { const result = await api(`/api/conversations/${route.params.id}/share`, { method: 'POST', body: { enabled: !data.value.shareEnabled } }); data.value.shareEnabled = result.shareEnabled; data.value.shareToken = result.shareToken; }
   finally { shareBusy.value = false; }
 }
-async function removeConversation() { if (!confirm('确定永久删除这整个对话及所有轮次附件吗？')) return; await api(`/api/conversations/${route.params.id}`, { method: 'DELETE' }); router.replace('/'); }
+async function removeConversation() { if (!confirm('确定删除这整个对话及所有附件吗？')) return; await api(`/api/conversations/${route.params.id}`, { method: 'DELETE' }); router.replace('/'); }
 function modelLabel(id) { return publicConfig.models.find((model) => model.id === id)?.label || id; }
-function statusText(status) { return ({ pending:'等待处理',compressing:'正在压缩附件',generating:'正在回答',completed:'已完成',error:'失败' })[status] || status; }
+function statusText(status) { return ({ pending:'等待处理',compressing:'正在处理附件',generating:'正在回答',completed:'已完成',error:'失败' })[status] || status; }
 function formatSize(size) { return size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`; }
 onMounted(async () => { await loadPublicConfig(); await load(); connect(); });
 onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
@@ -63,7 +63,7 @@ onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
     <template v-else-if="data">
       <header class="page-header conversation-header"><div><h1>{{ data.title }}</h1><p class="muted">{{ data.turns.length }} 轮对话</p></div><button class="button danger ghost" @click="removeConversation">删除对话</button></header>
       <section class="card share-panel">
-        <div><strong>公开分享</strong><p class="muted">分享链接无需登录，可查看对话并下载每轮附件。</p></div>
+        <div><strong>公开分享</strong></div>
         <div class="share-actions"><button class="button secondary" :disabled="shareBusy" @click="toggleShare">{{ data.shareEnabled ? '关闭分享' : '开启分享' }}</button><CopyButton v-if="data.shareEnabled" :text="shareUrl" label="复制分享链接" /></div>
         <input v-if="data.shareEnabled" :value="shareUrl" readonly />
       </section>
@@ -76,15 +76,15 @@ onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
               <form class="edit-form" @submit.prevent="submitEdit">
                 <label>模型<select v-model="edit.modelId"><option v-for="model in publicConfig.models" :key="model.id" :value="model.id">{{ model.label }}</option></select></label>
                 <textarea v-model="edit.question" rows="6"></textarea>
-                <p v-if="turn.hasAttachments" class="hint">本轮附件不可编辑；提交后会保留并重新用于模型请求。</p>
+                <p v-if="turn.hasAttachments" class="hint">已有附件将保持不变。</p>
                 <p v-if="edit.error" class="error-box">{{ edit.error }}</p>
                 <div class="row-actions"><button type="button" class="button ghost" :disabled="edit.busy" @click="edit = null">取消</button><button class="button primary" :disabled="edit.busy || !edit.question.trim()">{{ edit.busy ? '提交中…' : '提交编辑' }}</button></div>
               </form>
             </template>
             <p v-else class="message-text">{{ turn.question }}</p>
             <div v-if="turn.hasAttachments" class="attachment-row">
-              <span>本轮附件：{{ turn.attachmentReady ? `${formatSize(turn.attachmentSize)}` : '正在压缩，暂不可下载' }}</span>
-              <a v-if="turn.attachmentReady" class="button secondary compact" :href="`/api/conversations/${data.id}/turns/${turn.turnNo}/attachments`">下载本轮附件包</a>
+              <span>本轮附件：{{ turn.attachmentReady ? `${formatSize(turn.attachmentSize)}` : '正在处理，暂不可下载' }}</span>
+              <a v-if="turn.attachmentReady" class="button secondary compact" :href="`/api/conversations/${data.id}/turns/${turn.turnNo}/attachments`">下载附件</a>
             </div>
           </section>
           <section class="message assistant-message">

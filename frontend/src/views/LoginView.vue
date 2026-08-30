@@ -16,9 +16,9 @@ async function submit() {
   <main class="center-page">
     <form class="card login-card" @submit.prevent="submit">
       <h1>登录</h1>
-      <p class="muted">请输入管理员在后端 config.json 中为你配置的 token。</p>
+      <p class="muted">请输入你的访问码。</p>
       <input class="visually-hidden" name="username" autocomplete="username" value="token-user" tabindex="-1" />
-      <label>访问 Token
+      <label>访问码
         <div class="input-row"><input v-model="token" :type="show ? 'text' : 'password'" name="password" autocomplete="current-password" autofocus /><button type="button" class="button ghost" @click="show = !show">{{ show ? '隐藏' : '显示' }}</button></div>
       </label>
       <p v-if="error" class="error-box">{{ error }}</p>

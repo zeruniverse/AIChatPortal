@@ -95,11 +95,11 @@ publish();
 <template>
   <section class="uploader">
     <div class="uploader-actions">
-      <button type="button" class="button secondary" :disabled="disabled || busy" @click="openPicker">添加附件并立即上传</button>
+      <button type="button" class="button secondary" :disabled="disabled || busy" @click="openPicker">添加附件</button>
       <button v-if="items.length" type="button" class="button ghost" :disabled="disabled || busy" @click="clearAll">清空附件</button>
       <input ref="input" class="visually-hidden" type="file" multiple @change="choose" />
     </div>
-    <p class="hint">支持任意文件类型。必须全部上传完成后才能提交；提交后服务器在后台压缩并调用模型。</p>
+    <p class="hint">附件上传完成后即可提交。</p>
     <div v-if="items.length" class="upload-list">
       <div v-for="item in items" :key="item.localId" class="upload-item">
         <div class="upload-main">

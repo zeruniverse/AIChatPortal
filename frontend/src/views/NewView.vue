@@ -26,7 +26,7 @@ function keydown(event) { if (shouldSubmit(event)) { event.preventDefault(); sub
       <label>模型<select v-model="modelId"><option v-for="model in publicConfig.models" :key="model.id" :value="model.id">{{ model.label }}</option></select></label>
       <label>问题<textarea v-model="question" rows="9" placeholder="输入问题…" @keydown="keydown"></textarea></label>
       <AttachmentUploader ref="uploader" :disabled="busy" @state="uploadState = $event" />
-      <label class="check-row"><input v-model="shareEnabled" type="checkbox" /> 提交后开启公开分享</label>
+      <label class="check-row"><input v-model="shareEnabled" type="checkbox" /> 生成分享链接</label>
       <p v-if="error" class="error-box">{{ error }}</p>
       <button class="button primary full" :disabled="!canSubmit">{{ busy ? '正在提交…' : uploadState.busy ? '请等待附件上传完成' : '提交问题' }}</button>
     </form>
