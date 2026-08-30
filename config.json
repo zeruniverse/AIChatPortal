@@ -1,0 +1,59 @@
+{
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 3000
+  },
+  "auth": {
+    "sessionSecret": "replace-with-a-random-session-secret-at-least-32-characters",
+    "cookieSecure": false,
+    "users": [
+      {
+        "id": "user-1",
+        "label": "用户一",
+        "token": "replace-with-user-1-token-at-least-16-characters"
+      },
+      {
+        "id": "user-2",
+        "label": "用户二",
+        "token": "replace-with-user-2-token-at-least-16-characters"
+      }
+    ]
+  },
+  "provider": {
+    "url": "https://api.example.com/v1/chat/completions",
+    "key": "replace-with-provider-key",
+    "extraHeaders": {},
+    "systemPrompt": ""
+  },
+  "models": [
+    {
+      "id": "model-1",
+      "label": "模型一",
+      "request": {}
+    },
+    {
+      "id": "model-2",
+      "label": "模型二",
+      "request": {}
+    },
+    {
+      "id": "model-3",
+      "label": "模型三",
+      "request": {}
+    },
+    {
+      "id": "model-4",
+      "label": "模型四",
+      "request": {}
+    }
+  ],
+  "limits": {
+    "maxParallelTasks": 10,
+    "maxCompressedAttachmentBytes": 70000000,
+    "maxRawUploadBytes": 536870912,
+    "maxFiles": 100,
+    "maxPromptChars": 100000,
+    "maxProviderErrorBytes": 131072,
+    "maxAnswerChars": 10000000
+  }
+}

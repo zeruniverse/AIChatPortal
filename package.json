@@ -1,0 +1,30 @@
+{
+  "name": "openai-compatible-chat-app",
+  "version": "3.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node server/app.js",
+    "check": "node scripts/check.mjs",
+    "test": "node --test",
+    "verify": "npm run check && npm test && npm run build"
+  },
+  "dependencies": {
+    "archiver": "7.0.1",
+    "busboy": "1.6.0",
+    "express": "5.2.1",
+    "helmet": "8.1.0",
+    "markdown-it": "14.1.0",
+    "vue": "3.5.42",
+    "vue-router": "4.6.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.3",
+    "vite": "7.1.3"
+  }
+}
