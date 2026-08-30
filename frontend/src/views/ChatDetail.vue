@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import FilePicker from '../components/FilePicker.vue';
-import MarkdownBlock from '../components/MarkdownBlock.vue';
+import CopyTextButton from '../components/CopyTextButton.vue';
+import ModelAnswer from '../components/ModelAnswer.vue';
 import StatusPill from '../components/StatusPill.vue';
 import { absoluteUrl, apiFetch, createFollowUp, formatBytes, formatDate } from '../api.js';
+import { copyableAnswer } from '../answer-format.js';
 import { appState, clearPendingChat } from '../state.js';
 
 const route = useRoute();
@@ -15,7 +17,6 @@ const error = ref('');
 const connectionState = ref('connecting');
 const deleting = ref(false);
 const changingShare = ref(false);
-const copied = ref(false);
 const followPrompt = ref('');
 const followFiles = ref([]);
 const followSubmitting = ref(false);
@@ -24,7 +25,6 @@ const editingTurnNo = ref(null);
 const editPrompt = ref('');
 const editingSubmitting = ref(false);
 let eventSource;
-let copiedTimer;
 
 const id = computed(() => String(route.params.id));
 const shareLink = computed(() => absoluteUrl(chat.value?.shareUrl));
@@ -144,18 +144,8 @@ async function setSharing(enabled) {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
     });
     chat.value = { ...chat.value, ...updated };
-    copied.value = false;
   } catch (shareError) { error.value = shareError.message; }
   finally { changingShare.value = false; }
-}
-
-async function copyShareLink() {
-  try {
-    await navigator.clipboard.writeText(shareLink.value);
-    copied.value = true;
-    window.clearTimeout(copiedTimer);
-    copiedTimer = window.setTimeout(() => { copied.value = false; }, 1800);
-  } catch { window.prompt('复制这个分享链接：', shareLink.value); }
 }
 
 async function submitFollowUp() {
@@ -242,7 +232,7 @@ onMounted(() => {
   if (pendingEntry.value) optimisticInitial(pendingEntry.value);
   else fallbackLoad().then(() => { if (chat.value) connect(); });
 });
-onBeforeUnmount(() => { eventSource?.close(); window.clearTimeout(copiedTimer); });
+onBeforeUnmount(() => { eventSource?.close(); });
 </script>
 
 <template>
@@ -273,7 +263,7 @@ onBeforeUnmount(() => { eventSource?.close(); window.clearTimeout(copiedTimer); 
         <div class="share-controls">
           <template v-if="chat.shared">
             <input class="share-link-input" :value="shareLink" readonly aria-label="分享链接" />
-            <button class="secondary-button" type="button" @click="copyShareLink">{{ copied ? '已复制' : '复制链接' }}</button>
+            <CopyTextButton class="secondary-button" :text="shareLink" idle-label="复制链接" copied-label="已复制" />
             <button class="danger-button compact-button" type="button" :disabled="changingShare || initialUploadPending" @click="setSharing(false)">关闭分享</button>
           </template>
           <button v-else class="primary-button compact-button" type="button" :disabled="changingShare || initialUploadPending" @click="setSharing(true)">{{ changingShare ? '处理中…' : '开启分享' }}</button>
@@ -282,7 +272,13 @@ onBeforeUnmount(() => { eventSource?.close(); window.clearTimeout(copiedTimer); 
 
       <div v-for="turn in chat.turns" :key="turn.turnNo" class="turn-block">
         <section class="message user-message">
-          <div class="message-label"><span>你</span><strong>第 {{ turn.turnNo }} 次提问</strong><button class="message-edit-button" type="button" :disabled="editingSubmitting || followSubmitting || turn.localOnly || turn.status === 'uploading'" @click="startEdit(turn)">编辑</button></div>
+          <div class="message-label">
+            <span>你</span><strong>第 {{ turn.turnNo }} 次提问</strong>
+            <div class="message-label-actions">
+              <CopyTextButton :text="turn.prompt" idle-label="复制问题" />
+              <button class="message-edit-button" type="button" :disabled="editingSubmitting || followSubmitting || turn.localOnly || turn.status === 'uploading'" @click="startEdit(turn)">编辑</button>
+            </div>
+          </div>
           <form v-if="editingTurnNo === turn.turnNo" class="inline-edit-form" @submit.prevent="submitEdit(turn)">
             <textarea v-model="editPrompt" rows="5" :maxlength="limits.maxPromptChars || 100000" :disabled="editingSubmitting"></textarea>
             <p class="edit-attachment-note">本轮附件不可编辑：不能新增、删除或替换。提交后，本轮旧回答及其后的所有轮次将被永久删除并重新生成。</p>
@@ -300,8 +296,14 @@ onBeforeUnmount(() => { eventSource?.close(); window.clearTimeout(copiedTimer); 
         </section>
 
         <section class="message assistant-message">
-          <div class="message-label"><span>M</span><strong>第 {{ turn.turnNo }} 次回答</strong><StatusPill :status="turn.status" /></div>
-          <div v-if="turn.answer" class="answer-content" :class="{ 'answer-error': turn.status === 'failed' }"><MarkdownBlock :content="turn.answer" /></div>
+          <div class="message-label">
+            <span>M</span><strong>第 {{ turn.turnNo }} 次回答</strong>
+            <div class="message-label-actions">
+              <StatusPill :status="turn.status" />
+              <CopyTextButton :text="copyableAnswer(turn.answer)" idle-label="复制回答" />
+            </div>
+          </div>
+          <div v-if="turn.answer" class="answer-content" :class="{ 'answer-error': turn.status === 'failed' }"><ModelAnswer :content="turn.answer" :pending="!['completed', 'failed'].includes(turn.status)" /></div>
           <div v-else-if="turn.status === 'failed'" class="answer-placeholder failed-placeholder">模型调用失败，但没有可显示的错误详情。</div>
           <div v-else class="answer-placeholder">
             <span class="thinking-dots"><i></i><i></i><i></i></span>

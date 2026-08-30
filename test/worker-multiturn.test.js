@@ -21,7 +21,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CARRIER_PATH = path.resolve(HERE, '../server/assets/x.jpg');
+const CARRIER_PATH = path.resolve(HERE, '../server/assets/a.jpg');
 
 async function listen(server) {
   await new Promise((resolve, reject) => {

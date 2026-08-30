@@ -6,7 +6,7 @@
 
 ## 主要功能
 
-- `config.json` 中必须且只能配置 4 个模型。
+- `config.json` 中可配置 1-10 个模型；前端模型选择器会自动按配置渲染，不再要求恰好 4 个。
 - 可配置多个登录 token；每个 token 对应一个独立用户，不同用户的历史、详情、附件和删除操作互不可见。
 - 登录 token 保存在浏览器 localStorage，并由长期签名 HttpOnly Cookie 维持会话；不清除站点数据即可持续使用。
 - 点击提交后立即进入 `/chat/<uuid>`，前端立即显示问题和 pending 动画；附件上传被服务器完整接收后，压缩和 provider 调用均由服务器后台继续，关闭浏览器不会中止已保存任务。
@@ -19,6 +19,8 @@
 - 支持公开分享；分享链接使用 32 字节密码学随机数，即 256 位随机性和 43 个 Base64URL 字符。
 - 分享链接无需登录，可查看全部轮次，并下载每轮附件或全部轮次附件。
 - 支持手机和小屏幕：原生多文件选择、上传进度、安全区、动态视口、16px 表单字号、触控尺寸、长文件名换行、代码块和表格横向滚动。
+- 分享链接、每轮问题和每轮最终回答都有一键复制按钮；HTTPS 使用 Clipboard API，普通 HTTP 自动使用无弹窗复制回退。
+- provider 回答中的每一组 `<think>...</think>` 会单独显示为“查看思考过程/隐藏思考过程”；最终正文只取最后一个 `</think>` 后的内容，并自动删除开头的 `Answer:` 或 `回答:`。
 - 自动清理：始终删除 7 天前的对话；`chat/` 总占用超过 3,000,000,000 字节时，额外删除 24 小时前的对话。
 
 ## 数据结构
@@ -81,7 +83,9 @@ att.zip
 cat x.jpg att.zip > xa.jpg
 ```
 
-后端不会把全部内容一次性读入内存，而是连续流式读取 `x.jpg` 和 `<conversation-id>.attachments.bin` 后进行 Base64 编码。追问 prompt 会包含：
+运行时使用的 `server/assets/a.jpg` 是一张 10×10 彩色 JPEG，不是纯白占位图。项目同时保留字节完全相同的 `server/assets/x.jpg` 别名，因此此前要求的 `cat x.jpg att.zip > xa.jpg` 与实际发送字节完全一致。
+
+后端不会把全部内容一次性读入内存，而是连续流式读取彩色 `a.jpg`（与 `x.jpg` 字节相同）和 `<conversation-id>.attachments.bin` 后进行 Base64 编码。追问 prompt 会包含：
 
 ```text
 这是一次用户的追问，内容是 {当前追问内容}，如果有附图，附图是一个
@@ -241,6 +245,8 @@ provider HTTP 402：insufficient credit（type: payment_required；code: insuffi
 
 ## 配置文件
 
+`models` 数组支持 1-10 项。每个模型需要唯一的 `id`，可选 `label` 和 `request` 覆盖项；前端会自动显示全部已配置模型。
+
 完整示例见 `config.example.json`：
 
 ```json
@@ -348,9 +354,9 @@ npm run verify
 
 当前交付源码已实际完成：
 
-- Node 核心自动化测试 `42 / 42` 通过。
-- 另有 1 项覆盖登录、首问、追问、分享附件下载和编辑截断的完整 HTTP 联调测试；它会在安装 npm 依赖后自动启用。本次执行环境因 npm registry 连接超时而跳过该项。
-- 静态检查通过：32 个关键文件、21 个 JavaScript 文件、10 个 Vue/HTML 模板。
+- Node 核心自动化测试 `48 / 48` 通过；测试总计 49 项，其中 1 项完整 HTTP 联调因当前环境缺少 npm 依赖而按设计跳过。
+- 完整 HTTP 联调覆盖登录、首问、追问、分享附件下载和编辑截断；它会在安装 npm 依赖后自动启用。
+- 静态检查通过：37 个关键文件、23 个 JavaScript 文件、12 个 Vue/HTML 模板。
 - CSS 使用解析器检查，0 个语法错误。
 - SQLite `integrity_check` 为 `ok`，交付库的对话和轮次记录均为 0。
 - 真实 `zip/unzip` 测试验证外层 `1.zip、2.zip…`、逐轮下载、编辑截断和整段对话删除。

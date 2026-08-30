@@ -14,7 +14,7 @@ import {
 } from './base64-stream.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CARRIER_JPEG_PATH = path.join(HERE, 'assets', 'x.jpg');
+const CARRIER_JPEG_PATH = path.join(HERE, 'assets', 'a.jpg');
 const SENTINEL = '__ATTACHMENT_BASE64_SENTINEL_3f64f5ff__';
 
 export const ATTACHMENT_INSTRUCTION = [

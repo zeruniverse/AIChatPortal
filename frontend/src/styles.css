@@ -1102,3 +1102,128 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   background: rgba(176, 62, 55, .08);
   color: var(--danger);
 }
+
+/* v5.1 clipboard, response thoughts, and compact mobile message actions. */
+.clipboard-fallback {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.message-label { flex-wrap: wrap; }
+.message-label-actions {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding-left: 40px;
+}
+.copy-text-button,
+.message-label-actions .message-edit-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 5px 2px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.copy-text-button:disabled { opacity: .42; cursor: not-allowed; }
+.message-label-actions .message-edit-button,
+.message-label-actions .status-pill { margin-left: 0; }
+.thinking-sections {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 14px;
+}
+.thinking-section { min-width: 0; }
+.thinking-toggle {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+.thinking-toggle:hover { text-decoration: underline; }
+.thinking-content {
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  -webkit-overflow-scrolling: touch;
+}
+.final-answer { min-width: 0; }
+.final-answer-pending {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.final-answer-empty { margin: 6px 0 0; }
+
+@media (hover: hover) {
+  .copy-text-button:hover:not(:disabled),
+  .message-label-actions .message-edit-button:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+}
+
+@media (max-width: 767px) {
+  .message-label-actions {
+    flex: 1 1 120px;
+    justify-content: flex-end;
+    padding-left: 0;
+  }
+  .thinking-toggle { width: 100%; }
+  .thinking-content { padding: 12px; font-size: 11px; }
+}
+
+@media (max-width: 390px) {
+  .message-label-actions {
+    flex: 0 0 100%;
+    justify-content: flex-start;
+    padding-left: 40px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .thinking-content { background: #1d211e; }
+}
+.copy-text-button.secondary-button {
+  border: 1px solid var(--line-strong);
+  padding: 0 14px;
+  color: var(--text);
+  background: #fff;
+  font-size: 13px;
+}
+@media (max-width: 767px) {
+  .copy-text-button.secondary-button { padding: 0 10px; font-size: 11px; }
+}
+@media (prefers-color-scheme: dark) {
+  .copy-text-button.secondary-button { color: var(--text); background: #242824; }
+}

@@ -6,6 +6,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const HARD_MAX_COMPRESSED_BYTES = 70_000_000;
 const HARD_MAX_PARALLEL = 10;
+const MIN_MODELS = 1;
+const MAX_MODELS = 10;
 
 function looksLikePlaceholder(value) {
   return /^(?:replace-with|change-me|请替换)/i.test(String(value || '').trim());
@@ -95,8 +97,8 @@ export function loadConfig() {
   if (sessionSecret.length < 32) throw new Error('auth.sessionSecret 至少需要 32 个字符');
   if (looksLikePlaceholder(sessionSecret)) throw new Error('auth.sessionSecret 仍是示例占位值，请替换后再启动');
 
-  if (!Array.isArray(raw.models) || raw.models.length !== 4) {
-    throw new Error('models 必须且只能配置 4 个模型');
+  if (!Array.isArray(raw.models) || raw.models.length < MIN_MODELS || raw.models.length > MAX_MODELS) {
+    throw new Error(`models 必须配置 ${MIN_MODELS}-${MAX_MODELS} 个模型`);
   }
 
   const seen = new Set();

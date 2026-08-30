@@ -74,3 +74,19 @@ test('配置拒绝直接使用公开示例 token 和 sessionSecret', () => {
   placeholderSecret.auth.sessionSecret = 'replace-with-a-public-session-secret-that-is-long-enough';
   withConfig(placeholderSecret, () => assert.throws(() => loadConfig(), /示例占位值/));
 });
+
+test('模型数量支持 1-10 个，不再要求恰好 4 个', () => {
+  for (const count of [1, 2, 7, 10]) {
+    const config = baseConfig();
+    config.models = Array.from({ length: count }, (_, index) => ({ id: `m${index + 1}` }));
+    withConfig(config, () => assert.equal(loadConfig().models.length, count));
+  }
+
+  const none = baseConfig();
+  none.models = [];
+  withConfig(none, () => assert.throws(() => loadConfig(), /1-10/));
+
+  const tooMany = baseConfig();
+  tooMany.models = Array.from({ length: 11 }, (_, index) => ({ id: `m${index + 1}` }));
+  withConfig(tooMany, () => assert.throws(() => loadConfig(), /1-10/));
+});

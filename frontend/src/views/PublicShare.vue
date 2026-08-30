@@ -1,9 +1,11 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import MarkdownBlock from '../components/MarkdownBlock.vue';
+import CopyTextButton from '../components/CopyTextButton.vue';
+import ModelAnswer from '../components/ModelAnswer.vue';
 import StatusPill from '../components/StatusPill.vue';
 import { apiFetch, formatBytes, formatDate } from '../api.js';
+import { copyableAnswer } from '../answer-format.js';
 
 const route = useRoute();
 const shareToken = computed(() => String(route.params.shareToken || ''));
@@ -126,7 +128,10 @@ onBeforeUnmount(() => eventSource?.close());
 
       <div v-for="turn in chat.turns" :key="turn.turnNo" class="turn-block">
         <section class="message user-message">
-          <div class="message-label"><span>Q</span><strong>第 {{ turn.turnNo }} 次提问</strong></div>
+          <div class="message-label">
+            <span>Q</span><strong>第 {{ turn.turnNo }} 次提问</strong>
+            <div class="message-label-actions"><CopyTextButton :text="turn.prompt" idle-label="复制问题" /></div>
+          </div>
           <div class="message-body">
             <div class="plain-content">{{ turn.prompt }}</div>
             <div class="turn-tools">
@@ -139,9 +144,15 @@ onBeforeUnmount(() => eventSource?.close());
         </section>
 
         <section class="message assistant-message">
-          <div class="message-label"><span>M</span><strong>第 {{ turn.turnNo }} 次回答</strong><StatusPill :status="turn.status" /></div>
+          <div class="message-label">
+            <span>M</span><strong>第 {{ turn.turnNo }} 次回答</strong>
+            <div class="message-label-actions">
+              <StatusPill :status="turn.status" />
+              <CopyTextButton :text="copyableAnswer(turn.answer)" idle-label="复制回答" />
+            </div>
+          </div>
           <div class="message-body">
-            <div v-if="turn.answer" class="answer-content" :class="{ 'answer-error': turn.status === 'failed' }"><MarkdownBlock :content="turn.answer" /></div>
+            <div v-if="turn.answer" class="answer-content" :class="{ 'answer-error': turn.status === 'failed' }"><ModelAnswer :content="turn.answer" :pending="!['completed', 'failed'].includes(turn.status)" /></div>
             <div v-else-if="turn.status === 'failed'" class="answer-placeholder failed-placeholder">模型调用失败，但没有可显示的错误详情。</div>
             <div v-else class="answer-placeholder">
               <span class="thinking-dots"><i></i><i></i><i></i></span>

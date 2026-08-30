@@ -105,7 +105,7 @@ test('流式回答超过配置字符上限时会停止', async () => {
   }
 });
 
-test('带附件请求的图片字节严格等于 x.jpg 后拼接外层附件包', async () => {
+test('带附件请求的图片字节严格等于彩色 a.jpg 后拼接外层附件包', async () => {
   const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join, dirname } = await import('node:path');
@@ -139,7 +139,9 @@ test('带附件请求的图片字节严格等于 x.jpg 后拼接外层附件包'
     const dataUrl = captured.messages[1].content[1].image_url.url;
     const decoded = Buffer.from(dataUrl.split(',')[1], 'base64');
     const here = dirname(fileURLToPath(import.meta.url));
-    const carrier = await readFile(join(here, '..', 'server', 'assets', 'x.jpg'));
+    const carrier = await readFile(join(here, '..', 'server', 'assets', 'a.jpg'));
+    const compatibilityAlias = await readFile(join(here, '..', 'server', 'assets', 'x.jpg'));
+    assert.deepEqual(compatibilityAlias, carrier);
     assert.deepEqual(decoded, Buffer.concat([carrier, attachmentBytes]));
   } finally {
     await close(server);

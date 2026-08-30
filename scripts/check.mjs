@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { createDatabase } from '../server/db.js';
@@ -13,11 +14,13 @@ const required = [
   'frontend/src/views/LoginPage.vue', 'frontend/src/views/NewChat.vue',
   'frontend/src/views/HistoryPage.vue', 'frontend/src/views/ChatDetail.vue',
   'frontend/src/views/PublicShare.vue', 'frontend/src/components/FilePicker.vue',
-  'frontend/src/components/StatusPill.vue', 'frontend/src/styles.css',
+  'frontend/src/components/CopyTextButton.vue', 'frontend/src/components/ModelAnswer.vue',
+  'frontend/src/components/StatusPill.vue', 'frontend/src/clipboard.js',
+  'frontend/src/answer-format.js', 'frontend/src/styles.css',
   'server/app.js', 'server/auth.js', 'server/config.js', 'server/db.js',
   'server/storage.js', 'server/archive.js', 'server/worker.js',
   'server/provider.js', 'server/prompts.js', 'server/cleanup.js',
-  'server/assets/x.jpg', 'chat/sqlite.db', 'config.json', 'config.example.json',
+  'server/assets/a.jpg', 'server/assets/x.jpg', 'chat/sqlite.db', 'config.json', 'config.example.json',
   'Dockerfile', 'docker-compose.yml', 'README.md', 'AUDIT.md',
 ];
 for (const relative of required) {
@@ -26,7 +29,7 @@ for (const relative of required) {
 
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 const config = JSON.parse(read('config.json'));
-if (!Array.isArray(config.models) || config.models.length !== 4) throw new Error('config.json 必须且只能配置 4 个模型');
+if (!Array.isArray(config.models) || config.models.length < 1 || config.models.length > 10) throw new Error('config.json 必须配置 1-10 个模型');
 if (!Array.isArray(config.auth?.users) || config.auth.users.length < 1) throw new Error('config.json 至少需要一个登录 token');
 if (new Set(config.auth.users.map((user) => user.id)).size !== config.auth.users.length) throw new Error('登录用户 id 重复');
 if (new Set(config.auth.users.map((user) => user.token)).size !== config.auth.users.length) throw new Error('登录 token 重复');
@@ -54,6 +57,10 @@ const sources = Object.fromEntries([
   'history', 'frontend/src/views/HistoryPage.vue',
   'detail', 'frontend/src/views/ChatDetail.vue',
   'publicShare', 'frontend/src/views/PublicShare.vue',
+  'copyButton', 'frontend/src/components/CopyTextButton.vue',
+  'modelAnswer', 'frontend/src/components/ModelAnswer.vue',
+  'clipboard', 'frontend/src/clipboard.js',
+  'answerFormat', 'frontend/src/answer-format.js',
   'css', 'frontend/src/styles.css',
   'app', 'server/app.js',
   'auth', 'server/auth.js',
@@ -75,6 +82,12 @@ const sources = Object.fromEntries([
 }, []));
 
 const checks = [
+  [sources.runtimeConfig.includes('MIN_MODELS = 1') && sources.runtimeConfig.includes('MAX_MODELS = 10'), '模型数量没有改为 1-10 个范围'],
+  [sources.clipboard.includes("document.execCommand('copy')") && !sources.detail.includes('window.prompt'), '普通 HTTP 复制仍会弹窗或缺少无弹窗回退'],
+  [sources.detail.includes('复制链接') && sources.detail.includes('复制问题') && sources.detail.includes('复制回答'), '私有问题页复制功能不完整'],
+  [sources.publicShare.includes('复制问题') && sources.publicShare.includes('复制回答'), '分享页缺少问题或回答复制按钮'],
+  [sources.modelAnswer.includes('查看思考过程') && sources.modelAnswer.includes('隐藏思考过程'), '回答组件缺少思考过程展开/隐藏链接'],
+  [sources.answerFormat.includes('COMPLETE_THINK') && sources.answerFormat.includes('stripAnswerPrefix'), '缺少多段 think 解析或 Answer/回答 前缀清理'],
   [sources.html.includes('viewport-fit=cover'), '缺少手机安全区 viewport 配置'],
   [/type="file"[\s\S]*multiple/.test(sources.picker), '附件选择器没有开启多选'],
   [!sources.picker.includes('accept='), '附件选择器不应限制文件类型'],
@@ -107,7 +120,7 @@ const checks = [
   [sources.worker.includes('compressPendingTurnAttachments') && sources.worker.indexOf('compressPendingTurnAttachments') < sources.worker.indexOf('callProvider'), '模型调用前没有异步压缩附件'],
   [sources.prompts.includes('这是一次用户的追问，内容是') && sources.prompts.includes('之前的提问/回答历史为'), '追问 prompt 格式不符合要求'],
   [sources.prompts.includes('cat x.jpg att.zip > xa.jpg') && sources.provider.includes('cat x.jpg att.zip > xa.jpg'), '附图生成方式说明不一致'],
-  [sources.provider.includes("assets', 'x.jpg") && sources.provider.includes('concatenateBinarySources'), 'provider 图片没有按 x.jpg + att.zip 拼接'],
+  [sources.provider.includes("assets', 'a.jpg") && sources.provider.includes('concatenateBinarySources'), 'provider 图片没有使用彩色 a.jpg 载体并拼接 att.zip'],
   [sources.app.includes('/turns/:turnNo/attachments') && sources.app.includes('/api/public/shares/:shareToken/turns/:turnNo/attachments'), '私有或分享用户缺少逐轮附件下载'],
   [sources.publicShare.includes('下载本轮全部附件') && sources.publicShare.includes('下载全部轮次附件'), '分享页面附件下载入口不完整'],
   [sources.app.includes('附件仍在压缩，暂时不能下载'), '压缩完成前没有阻止附件下载'],
@@ -132,9 +145,34 @@ const checks = [
 ];
 for (const [ok, message] of checks) if (!ok) throw new Error(message);
 
-const jpeg = fs.readFileSync(path.join(root, 'server/assets/x.jpg'));
-if (jpeg.length < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg.at(-2) !== 0xff || jpeg.at(-1) !== 0xd9) {
-  throw new Error('server/assets/x.jpg 不是完整 JPEG');
+function jpegDimensions(buffer) {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 8 < buffer.length) {
+    if (buffer[offset] !== 0xff) { offset += 1; continue; }
+    const marker = buffer[offset + 1];
+    offset += 2;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    if (offset + 2 > buffer.length) break;
+    const length = buffer.readUInt16BE(offset);
+    if (length < 2 || offset + length > buffer.length) break;
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      return { height: buffer.readUInt16BE(offset + 3), width: buffer.readUInt16BE(offset + 5) };
+    }
+    offset += length;
+  }
+  return null;
+}
+
+const expectedCarrierHash = '00dc2aa48b9ce3d233aa988a4213026c11a42862c8f4366f1d18c195d358f982';
+for (const filename of ['a.jpg', 'x.jpg']) {
+  const jpeg = fs.readFileSync(path.join(root, 'server/assets', filename));
+  const dimensions = jpegDimensions(jpeg);
+  if (!dimensions || dimensions.width !== 10 || dimensions.height !== 10 || jpeg.at(-2) !== 0xff || jpeg.at(-1) !== 0xd9) {
+    throw new Error(`server/assets/${filename} 必须是完整的 10x10 JPEG`);
+  }
+  const hash = createHash('sha256').update(jpeg).digest('hex');
+  if (hash !== expectedCarrierHash) throw new Error(`server/assets/${filename} 不是内置彩色载体图`);
 }
 
 function collect(directory, matcher, output) {
