@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 import { api } from '../api.js';
 
 const props = defineProps({ disabled: Boolean });
@@ -36,7 +36,7 @@ async function choose(event) {
 
 async function uploadOne(session, file, currentGeneration) {
   if (currentGeneration !== generation) return;
-  const local = { localId: `${Date.now()}-${Math.random()}`, serverId: null, name: file.name, size: file.size, type: file.type, progress: 0, status: 'registering', error: '' };
+  const local = reactive({ localId: `${Date.now()}-${Math.random()}`, serverId: null, name: file.name, size: file.size, type: file.type, progress: 0, status: 'registering', error: '' });
   items.value.push(local); publish();
   try {
     const registered = await api(`/api/uploads/${session}/files`, { method: 'POST', body: { name: file.name, size: file.size, type: file.type } });

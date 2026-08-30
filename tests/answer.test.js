@@ -1,11 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseAnswerSegments, visibleAnswer, stripLeadingAnswerPrefix } from '../frontend/src/utils/answerParser.js';
+import { stripLeadingAnswerPrefix as stripServerPrefix } from '../server/answer.js';
 
 const cases = [
   ['Answer:\nhello', 'hello'],
   ['  ## 回答： hello', 'hello'],
   ['\n# Answer：\nhello', 'hello'],
+  ['## 回答\nhello', 'hello'],
+  ['  # Answer hello', 'hello'],
+  ['Answer\nhello', 'hello'],
+  ['回答 hello', 'hello'],
+  ['回答这个问题需要两步', '回答这个问题需要两步'],
+  ['Answering this question', 'Answering this question'],
   ['prefix\nAnswer:\ninside', 'prefix\nAnswer:\ninside']
 ];
 for (const [input, expected] of cases) test(`prefix ${JSON.stringify(input)}`, () => assert.equal(stripLeadingAnswerPrefix(input), expected));
@@ -27,3 +34,5 @@ test('unfinished think is not copied as answer', () => {
   assert.equal(visibleAnswer(raw), 'visible');
   assert.equal(parseAnswerSegments(raw).at(-1).complete, false);
 });
+
+for (const [input, expected] of cases) test(`server prefix ${JSON.stringify(input)}`, () => assert.equal(stripServerPrefix(input), expected));

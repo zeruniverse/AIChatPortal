@@ -1,6 +1,6 @@
 export function stripLeadingAnswerPrefix(text) {
   let value = String(text ?? '').trimStart();
-  value = value.replace(/^(?:#{1,6}[ \t]*)?(?:answer|回答)[ \t]*[:：][ \t]*(?:\r?\n)?/i, '');
+  value = value.replace(/^(?:#{1,6}[ \t]*)?(?:answer|回答)(?=$|[ \t\r\n:：])[ \t]*[:：]?[ \t]*(?:\r?\n)?/i, '');
   return value.trim();
 }
 

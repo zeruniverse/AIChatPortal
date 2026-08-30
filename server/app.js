@@ -189,7 +189,7 @@ async function streamDownload(res, filePath, filename) {
 
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
-  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, version: '6.0.0' });
+  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, version: '6.0.1' });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, { models: config.models, limits: { maxFilesPerTurn: config.limits.maxFilesPerTurn, maxCompressedAttachmentBytes: config.limits.maxCompressedAttachmentBytes } });
   if (req.method === 'GET' && pathname === '/api/auth/me') {
     const user = auth.currentUser(req);

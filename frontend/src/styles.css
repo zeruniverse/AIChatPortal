@@ -31,8 +31,11 @@ h2 { font-size: 1.1rem; }
 .muted, .hint { color: #64748b; font-weight: 400; }
 .hint { font-size: .9rem; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .toolbar, .row-actions, .share-actions, .uploader-actions, .message-actions, .input-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .input-row { flex-wrap: nowrap; }
+.input-row > input { flex: 1 1 auto; width: auto; min-width: 0; }
+.password-toggle { flex: 0 0 auto; min-width: 72px; white-space: nowrap; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 10px; padding: 9px 14px; text-decoration: none; cursor: pointer; font-weight: 700; }
 .button.primary { background: #2563eb; color: #fff; }
 .button.secondary { background: #e0e7ff; color: #3730a3; }
@@ -88,7 +91,10 @@ h2 { font-size: 1.1rem; }
   .topbar { align-items: center; }
   .topbar nav { gap: 10px; font-size: .9rem; }
   .page { padding-top: 18px; }
-  .page-header, .share-panel, .message-head, .attachment-row, .history-item { align-items: stretch; flex-direction: column; }
+  .page-header:not(.history-header), .share-panel, .message-head, .attachment-row, .history-item { align-items: stretch; flex-direction: column; }
+  .history-header { align-items: stretch; flex-direction: column; }
+  .history-header .header-actions { width: 100%; justify-content: flex-start; }
+  .history-header .header-actions .button { flex: 1 1 0; white-space: nowrap; }
   .share-panel { grid-template-columns: 1fr; }
   .share-panel input { grid-column: auto; }
   .share-actions, .message-actions, .row-actions { width: 100%; }

@@ -19,7 +19,7 @@ async function submit() {
       <p class="muted">请输入你的访问码。</p>
       <input class="visually-hidden" name="username" autocomplete="username" value="token-user" tabindex="-1" />
       <label>访问码
-        <div class="input-row"><input v-model="token" :type="show ? 'text' : 'password'" name="password" autocomplete="current-password" autofocus /><button type="button" class="button ghost" @click="show = !show">{{ show ? '隐藏' : '显示' }}</button></div>
+        <div class="input-row"><input v-model="token" :type="show ? 'text' : 'password'" name="password" autocomplete="current-password" autofocus /><button type="button" class="button ghost password-toggle" @click="show = !show">{{ show ? '隐藏' : '显示' }}</button></div>
       </label>
       <p v-if="error" class="error-box">{{ error }}</p>
       <button class="button primary full" :disabled="busy || !token">{{ busy ? '登录中…' : '登录' }}</button>
