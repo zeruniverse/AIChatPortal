@@ -131,6 +131,14 @@ test('HTTP API 完成登录、首问、追问、分享下载和编辑截断的�
 
   try {
     await waitFor(async () => (await fetch(`${base}/api/health`)).ok);
+
+    const anonymousMe = await fetch(`${base}/api/auth/me`);
+    assert.equal(anonymousMe.status, 200);
+    assert.deepEqual(await anonymousMe.json(), { authenticated: false, user: null });
+    assert.equal(anonymousMe.headers.get('cross-origin-opener-policy'), null);
+    assert.equal(anonymousMe.headers.get('origin-agent-cluster'), null);
+    assert.equal(anonymousMe.headers.get('strict-transport-security'), null);
+
     const login = await fetch(`${base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

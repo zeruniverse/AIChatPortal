@@ -45,6 +45,12 @@ let submissionsInProgress = 0;
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(helmet({
+  // These isolation headers are ignored or noisy on ordinary HTTP IP origins.
+  // The application does not need cross-origin isolation, so omit them uniformly
+  // for HTML, API, static assets and redirects.
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  originAgentCluster: false,
   strictTransportSecurity: false,
   referrerPolicy: { policy: 'no-referrer' },
   crossOriginResourcePolicy: { policy: 'same-origin' },
@@ -56,6 +62,15 @@ app.use(helmet({
     },
   },
 }));
+app.use((_req, res, next) => {
+  // Defensive removal keeps every response uniform even if Helmet defaults
+  // change in a future dependency update.
+  res.removeHeader('Cross-Origin-Opener-Policy');
+  res.removeHeader('Cross-Origin-Embedder-Policy');
+  res.removeHeader('Origin-Agent-Cluster');
+  res.removeHeader('Strict-Transport-Security');
+  next();
+});
 app.use(express.json({ limit: '256kb' }));
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
@@ -220,7 +235,12 @@ app.post('/api/auth/login', (req, res) => {
   return res.json({ user });
 });
 app.post('/api/auth/logout', (_req, res) => { auth.clearSession(res); res.status(204).end(); });
-app.get('/api/auth/me', auth.requireAuth, (req, res) => res.json({ user: req.user }));
+app.get('/api/auth/me', (req, res) => {
+  const user = auth.userFromRequest(req);
+  if (!user) return res.json({ authenticated: false, user: null });
+  auth.setSession(res, user);
+  return res.json({ authenticated: true, user });
+});
 
 app.get('/api/public/shares/:shareToken', validateShareToken, async (req, res, next) => {
   try {

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import FilePicker from '../components/FilePicker.vue';
 import { createChat, formatBytes } from '../api.js';
+import { createClientConversationId } from '../id.js';
 import { appState, failPendingChat, finishPendingChat, loadAppConfig, startPendingChat, updatePendingChat } from '../state.js';
 
 const router = useRouter();
@@ -27,7 +28,7 @@ async function submit() {
   if (!text) { error.value = '请输入问题'; return; }
   if (!modelId.value) { error.value = '请选择模型'; return; }
   submitting.value = true;
-  const id = crypto.randomUUID();
+  const id = createClientConversationId();
   const model = config.value?.models.find((item) => item.id === modelId.value);
   startPendingChat(id, {
     id, title: text.slice(0, 80), modelId: modelId.value, modelLabel: model?.label || modelId.value,

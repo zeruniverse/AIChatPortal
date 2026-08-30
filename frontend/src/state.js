@@ -50,10 +50,13 @@ export async function ensureAuthenticated(force = false) {
   authenticationPromise = (async () => {
     try {
       const result = await apiFetch('/api/auth/me');
-      appState.user = result.user;
-      appState.authChecked = true;
-      return true;
+      if (result?.authenticated && result.user) {
+        appState.user = result.user;
+        appState.authChecked = true;
+        return true;
+      }
     } catch (error) {
+      // Compatibility with an older backend that returned 401 for anonymous /auth/me.
       if (!(error instanceof ApiError) || error.status !== 401) throw error;
     }
     const savedToken = getSavedToken();

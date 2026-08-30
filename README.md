@@ -1,4 +1,4 @@
-# OpenAI-compatible 多轮问答 Web App
+# OpenAI-compatible 多轮问答 Web App（v5.2）
 
 这是一个可直接部署的 Node.js + Express 后端、Vue 3 + Vite 前端的多轮问答应用。浏览器页面可以使用普通 HTTP，后端可以连接 HTTP 或 HTTPS 的 OpenAI-compatible `chat/completions` provider。
 
@@ -16,10 +16,10 @@
 - 服务重启后，未完成任务会重新排队并从头调用 provider。
 - 全系统最多 10 个上传中、排队中、压缩中或调用 provider 的任务。
 - provider 调用失败时，脱敏后的实际错误原因直接替代回答，例如 `insufficient credit`。
-- 支持公开分享；分享链接使用 32 字节密码学随机数，即 256 位随机性和 43 个 Base64URL 字符。
+- 支持公开分享；分享链接由后端生成 43 个 Base64URL 字符的长随机串；它不依赖浏览器安全上下文，因此普通 HTTP 也可创建和访问。
 - 分享链接无需登录，可查看全部轮次，并下载每轮附件或全部轮次附件。
 - 支持手机和小屏幕：原生多文件选择、上传进度、安全区、动态视口、16px 表单字号、触控尺寸、长文件名换行、代码块和表格横向滚动。
-- 分享链接、每轮问题和每轮最终回答都有一键复制按钮；HTTPS 使用 Clipboard API，普通 HTTP 自动使用无弹窗复制回退。
+- 分享链接、每轮问题和每轮最终回答都有一键复制按钮；HTTPS 优先使用 Clipboard API，普通 HTTP 自动使用隐藏文本域 + `execCommand('copy')` 的无弹窗回退；失败时只在按钮上提示，不会弹出手工复制窗口。
 - provider 回答中的每一组 `<think>...</think>` 会单独显示为“查看思考过程/隐藏思考过程”；最终正文只取最后一个 `</think>` 后的内容，并自动删除开头的 `Answer:` 或 `回答:`。
 - 自动清理：始终删除 7 天前的对话；`chat/` 总占用超过 3,000,000,000 字节时，额外删除 24 小时前的对话。
 
@@ -331,7 +331,15 @@ docker compose logs -f
 http://服务器地址:3000/api/health
 ```
 
-Docker runtime 已安装 `zip` 和 `unzip`。应用页面可以通过 HTTP 访问，provider 可配置为 HTTPS。应用关闭了 HSTS 和 CSP `upgrade-insecure-requests`，不会自行把 HTTP 页面强制升级到 HTTPS。
+Docker runtime 已安装 `zip` 和 `unzip`。应用页面可以通过 HTTP 访问，provider 可配置为 HTTPS。应用关闭了 HSTS、CSP `upgrade-insecure-requests`、Cross-Origin-Opener-Policy 和 Origin-Agent-Cluster，不会自行升级 HTTP，也不会在普通 IP 地址的 HTTP 页面触发这两类浏览器安全上下文警告。
+
+
+### 普通 HTTP 浏览器兼容
+
+- 首次提问的临时对话 UUID 不再直接依赖 `crypto.randomUUID()`。HTTPS/localhost 可使用原生实现；普通 HTTP、旧版 WebView 或缺少该函数的浏览器会自动改用 `getRandomValues` 或本地兼容回退，仍生成符合 UUID v4 格式的地址。
+- 未登录时 `/api/auth/me` 返回 HTTP 200 和 `{ "authenticated": false, "user": null }`，避免登录页初始化时在控制台出现预期内的 401 错误；真正的私有 API 仍然返回 401。
+- token 登录表单包含隐藏的 `username` 辅助字段，避免 Chromium 的 password form 可访问性警告。
+- 分享随机串在 Node.js 后端生成，不使用浏览器 Web Crypto，因此与页面是否通过 HTTPS 无关。
 
 ## 本地运行
 
@@ -354,9 +362,9 @@ npm run verify
 
 当前交付源码已实际完成：
 
-- Node 核心自动化测试 `48 / 48` 通过；测试总计 49 项，其中 1 项完整 HTTP 联调因当前环境缺少 npm 依赖而按设计跳过。
+- Node 核心自动化测试 `50 / 50` 通过；测试总计 51 项，其中 1 项完整 HTTP 联调因当前环境缺少 npm 依赖而按设计跳过。
 - 完整 HTTP 联调覆盖登录、首问、追问、分享附件下载和编辑截断；它会在安装 npm 依赖后自动启用。
-- 静态检查通过：37 个关键文件、23 个 JavaScript 文件、12 个 Vue/HTML 模板。
+- 静态检查通过：38 个关键文件、24 个 JavaScript 文件、12 个 Vue/HTML 模板。
 - CSS 使用解析器检查，0 个语法错误。
 - SQLite `integrity_check` 为 `ok`，交付库的对话和轮次记录均为 0。
 - 真实 `zip/unzip` 测试验证外层 `1.zip、2.zip…`、逐轮下载、编辑截断和整段对话删除。

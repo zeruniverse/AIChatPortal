@@ -36,6 +36,18 @@ async function submit() {
       <h1 id="login-title">输入访问 token</h1>
       <p>token 由管理员在后端 config.json 中配置。登录后，本浏览器会保持登录状态，直到你退出或清除浏览器数据。</p>
       <form @submit.prevent="submit">
+        <label class="visually-hidden" for="login-username">用户名</label>
+        <input
+          id="login-username"
+          class="auth-username-sentinel"
+          name="username"
+          type="text"
+          value="token-user"
+          autocomplete="username"
+          tabindex="-1"
+          aria-hidden="true"
+          readonly
+        />
         <label for="login-token">访问 token</label>
         <input
           id="login-token"

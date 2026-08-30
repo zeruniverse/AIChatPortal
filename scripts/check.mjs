@@ -10,7 +10,7 @@ import { createDatabase } from '../server/db.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
   'package.json', 'vite.config.js', 'frontend/index.html',
-  'frontend/src/main.js', 'frontend/src/state.js', 'frontend/src/api.js',
+  'frontend/src/main.js', 'frontend/src/state.js', 'frontend/src/api.js', 'frontend/src/id.js',
   'frontend/src/views/LoginPage.vue', 'frontend/src/views/NewChat.vue',
   'frontend/src/views/HistoryPage.vue', 'frontend/src/views/ChatDetail.vue',
   'frontend/src/views/PublicShare.vue', 'frontend/src/components/FilePicker.vue',
@@ -41,7 +41,7 @@ for (const model of config.models) {
 }
 
 const packageJson = JSON.parse(read('package.json'));
-if (!String(packageJson.version).startsWith('5.')) throw new Error('项目版本未升级到 v5');
+if (packageJson.version !== '5.2.0') throw new Error('项目版本必须为 5.2.0');
 for (const [name, version] of Object.entries({ ...packageJson.dependencies, ...packageJson.devDependencies })) {
   if (/^[~^*]|\bx\b/i.test(version)) throw new Error(`依赖 ${name} 没有固定版本：${version}`);
 }
@@ -52,6 +52,8 @@ const sources = Object.fromEntries([
   'main', 'frontend/src/main.js',
   'state', 'frontend/src/state.js',
   'api', 'frontend/src/api.js',
+  'id', 'frontend/src/id.js',
+  'login', 'frontend/src/views/LoginPage.vue',
   'picker', 'frontend/src/components/FilePicker.vue',
   'newChat', 'frontend/src/views/NewChat.vue',
   'history', 'frontend/src/views/HistoryPage.vue',
@@ -83,7 +85,9 @@ const sources = Object.fromEntries([
 
 const checks = [
   [sources.runtimeConfig.includes('MIN_MODELS = 1') && sources.runtimeConfig.includes('MAX_MODELS = 10'), '模型数量没有改为 1-10 个范围'],
-  [sources.clipboard.includes("document.execCommand('copy')") && !sources.detail.includes('window.prompt'), '普通 HTTP 复制仍会弹窗或缺少无弹窗回退'],
+  [sources.newChat.includes('createClientConversationId') && !sources.newChat.includes('crypto.randomUUID'), '普通 HTTP 下仍直接依赖 crypto.randomUUID'],
+  [sources.id.includes('getRandomValues') && sources.id.includes('fallbackBytes'), '缺少 HTTP/旧浏览器可用的客户端 ID 回退'],
+  [sources.clipboard.includes("document.execCommand('copy')") && !sources.clipboard.includes('window.prompt') && !sources.clipboard.includes('prompt('), '普通 HTTP 复制仍会弹窗或缺少无弹窗回退'],
   [sources.detail.includes('复制链接') && sources.detail.includes('复制问题') && sources.detail.includes('复制回答'), '私有问题页复制功能不完整'],
   [sources.publicShare.includes('复制问题') && sources.publicShare.includes('复制回答'), '分享页缺少问题或回答复制按钮'],
   [sources.modelAnswer.includes('查看思考过程') && sources.modelAnswer.includes('隐藏思考过程'), '回答组件缺少思考过程展开/隐藏链接'],
@@ -99,6 +103,7 @@ const checks = [
   [sources.css.includes('overflow-wrap: anywhere'), '长文件名或错误文字可能撑破小屏'],
 
   [sources.main.includes("name: 'login'") && sources.main.includes('ensureAuthenticated'), '首页/提问页没有登录保护'],
+  [sources.login.includes('autocomplete="username"') && sources.login.includes('auth-username-sentinel'), 'token 登录表单缺少辅助 username 字段'],
   [sources.main.includes("name: 'share'") && sources.main.includes("meta: { public: true"), '公开分享页没有免登录'],
   [sources.state.includes('localStorage') || sources.api.includes('localStorage'), '登录 token 没有持久化到浏览器'],
   [sources.auth.includes('timingSafeEqual'), '登录 token 没有恒定时间比较'],
@@ -135,6 +140,8 @@ const checks = [
   [sources.app.includes('randomBytes(32).toString') && sources.app.includes('/api/public/shares/:shareToken'), '分享随机串不足 256 位或缺少公开接口'],
   [sources.app.includes("app.use('/api', auth.requireAuth)"), '私有 API 没有统一要求登录'],
   [sources.app.includes('strictTransportSecurity: false') && sources.app.includes('upgradeInsecureRequests: null'), '应用自身会阻止普通 HTTP 访问'],
+  [sources.app.includes('crossOriginOpenerPolicy: false') && sources.app.includes('originAgentCluster: false') && sources.app.includes("removeHeader('Cross-Origin-Opener-Policy')") && sources.app.includes("removeHeader('Origin-Agent-Cluster')"), '普通 HTTP 下仍发送 COOP 或 Origin-Agent-Cluster 头'],
+  [sources.app.includes('authenticated: false, user: null') && sources.state.includes('result?.authenticated'), '匿名登录状态检查仍依赖 401'],
   [sources.provider.includes("target.protocol === 'https:' ? https : http"), '后端 provider 不同时支持 HTTP/HTTPS'],
   [sources.app.includes('server.requestTimeout = 0') && sources.provider.includes('timeout: 0'), '长时间等待可能被服务器或 provider 请求超时中止'],
   [sources.worker.includes('resetInterrupted') && sources.worker.includes('listUnfinishedTasks'), '服务重启后没有恢复未完成任务'],
