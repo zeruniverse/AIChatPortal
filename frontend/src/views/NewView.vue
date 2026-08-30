@@ -1,0 +1,34 @@
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { api } from '../api.js';
+import { loadPublicConfig, publicConfig } from '../configStore.js';
+import { shouldSubmit } from '../utils/shortcut.js';
+import AttachmentUploader from '../components/AttachmentUploader.vue';
+const router = useRouter(); const question = ref(''); const modelId = ref(''); const shareEnabled = ref(false); const busy = ref(false); const error = ref(''); const uploader = ref(null);
+const uploadState = ref({ uploadId: null, busy: false, failed: false, hasFiles: false, ready: true });
+const canSubmit = computed(() => question.value.trim() && modelId.value && uploadState.value.ready && !busy.value);
+onMounted(async () => { await loadPublicConfig(); modelId.value ||= publicConfig.models[0]?.id || ''; });
+async function submit() {
+  if (!canSubmit.value) return;
+  busy.value = true; error.value = '';
+  try {
+    const result = await api('/api/conversations', { method: 'POST', body: { question: question.value, modelId: modelId.value, shareEnabled: shareEnabled.value, uploadId: uploadState.value.hasFiles ? uploadState.value.uploadId : null } });
+    await router.replace(result.url);
+  } catch (e) { error.value = e.message; busy.value = false; }
+}
+function keydown(event) { if (shouldSubmit(event)) { event.preventDefault(); submit(); } }
+</script>
+<template>
+  <main class="page narrow">
+    <header class="page-header"><div><h1>新建提问</h1><p class="muted">Ctrl+Enter 或 Cmd+Enter 提交；Enter 与 Shift+Enter 只换行。</p></div></header>
+    <form class="card composer" @submit.prevent="submit">
+      <label>模型<select v-model="modelId"><option v-for="model in publicConfig.models" :key="model.id" :value="model.id">{{ model.label }}</option></select></label>
+      <label>问题<textarea v-model="question" rows="9" placeholder="输入问题…" @keydown="keydown"></textarea></label>
+      <AttachmentUploader ref="uploader" :disabled="busy" @state="uploadState = $event" />
+      <label class="check-row"><input v-model="shareEnabled" type="checkbox" /> 提交后开启公开分享</label>
+      <p v-if="error" class="error-box">{{ error }}</p>
+      <button class="button primary full" :disabled="!canSubmit">{{ busy ? '正在提交…' : uploadState.busy ? '请等待附件上传完成' : '提交问题' }}</button>
+    </form>
+  </main>
+</template>

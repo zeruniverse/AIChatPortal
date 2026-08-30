@@ -1,59 +1,44 @@
 {
-  "listen": {
-    "host": "0.0.0.0",
-    "port": 3000
-  },
+  "host": "0.0.0.0",
+  "port": 3000,
   "auth": {
-    "sessionSecret": "replace-with-a-random-session-secret-at-least-32-characters",
-    "cookieSecure": false,
+    "sessionSecret": "replace-with-at-least-32-random-characters",
+    "cookieName": "chat_session",
+    "legacyOwnerId": "user-1",
     "users": [
       {
         "id": "user-1",
         "label": "用户一",
-        "token": "replace-with-user-1-token-at-least-16-characters"
+        "token": "replace-with-a-long-user-token-1"
       },
       {
         "id": "user-2",
         "label": "用户二",
-        "token": "replace-with-user-2-token-at-least-16-characters"
+        "token": "replace-with-a-long-user-token-2"
       }
     ]
   },
   "provider": {
-    "url": "https://api.example.com/v1/chat/completions",
+    "url": "https://provider.example.com/v1/chat/completions",
     "key": "replace-with-provider-key",
-    "extraHeaders": {},
-    "systemPrompt": ""
+    "headers": {},
+    "extraBody": {}
   },
   "models": [
-    {
-      "id": "model-1",
-      "label": "模型一",
-      "request": {}
-    },
-    {
-      "id": "model-2",
-      "label": "模型二",
-      "request": {}
-    },
-    {
-      "id": "model-3",
-      "label": "模型三",
-      "request": {}
-    },
-    {
-      "id": "model-4",
-      "label": "模型四",
-      "request": {}
-    }
+    { "id": "model-a", "label": "模型 A" },
+    { "id": "model-b", "label": "模型 B" }
   ],
   "limits": {
-    "maxParallelTasks": 10,
+    "maxConcurrentTasks": 10,
     "maxCompressedAttachmentBytes": 70000000,
-    "maxRawUploadBytes": 536870912,
-    "maxFiles": 100,
-    "maxPromptChars": 100000,
-    "maxProviderErrorBytes": 131072,
-    "maxAnswerChars": 10000000
+    "maxRawUploadBytesPerTurn": 0,
+    "maxFilesPerTurn": 100
+  },
+  "cleanup": {
+    "maxChatBytes": 3000000000,
+    "pressureAgeHours": 24,
+    "maxAgeDays": 7,
+    "orphanUploadHours": 24,
+    "intervalMinutes": 10
   }
 }

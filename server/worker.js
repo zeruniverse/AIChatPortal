@@ -1,244 +1,231 @@
-import { randomUUID } from 'node:crypto';
-import {
-  appendTextEvent,
-  compressPendingTurnAttachments,
-  createTextEventWriter,
-  readConversation,
-  attachmentBinPath,
-  ensureConversationArchiveV2,
-} from './storage.js';
-import { ATTACHMENT_INSTRUCTION, callProvider } from './provider.js';
-import { buildProviderPrompt } from './prompts.js';
-import { redactProviderSecrets } from './redact.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { callProvider } from './provider.js';
+import { visibleAnswer } from './answer.js';
+import { ensureDir, now, redactSecrets, removePath } from './utils.js';
 
-function taskKey(chatId, turnNo) {
-  return `${chatId}:${turnNo}`;
-}
-
-function mergedTurns(metadataTurns, textTurns) {
-  const textByNumber = new Map(textTurns.map((turn) => [turn.turnNumber, turn]));
-  return metadataTurns.map((turn) => {
-    const text = textByNumber.get(turn.turnNo) || {};
-    return {
-      ...turn,
-      prompt: text.prompt || '',
-      answer: turn.status === 'failed' ? '' : (text.answer || ''),
-      error: turn.error || text.error || null,
-      latestAttemptId: text.latestAttemptId || turn.attemptId || null,
-      deltaSequence: text.deltaSequence || 0,
-      attachments: text.attachments || [],
-    };
+function runCommand(command, args, { cwd, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    const abort = () => child.kill('SIGTERM');
+    signal?.addEventListener('abort', abort, { once: true });
+    child.on('error', reject);
+    child.on('close', (code, sig) => {
+      signal?.removeEventListener('abort', abort);
+      if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+      if (code === 0) resolve();
+      else reject(new Error(`${command} 失败（${sig || code}）：${stderr.trim()}`));
+    });
   });
 }
 
-export class WorkerPool {
-  constructor({ config, database, events }) {
-    this.config = config;
-    this.database = database;
-    this.events = events;
-    this.queue = [];
-    this.queued = new Map();
-    this.active = new Map();
-    this.stopping = false;
+function turnText(textData, turnNo) {
+  return textData.turns.find((turn) => turn.turnNo === turnNo);
+}
+
+function buildPrompt(textData, turnNo, hasAggregateAttachment) {
+  const current = turnText(textData, turnNo);
+  if (turnNo === 1) return current.question;
+  const history = [];
+  for (const turn of textData.turns.filter((item) => item.turnNo < turnNo).sort((a, b) => a.turnNo - b.turnNo)) {
+    history.push(`第${numberName(turn.turnNo)}次提问：\n${turn.question}`);
+    history.push(`第${numberName(turn.turnNo)}次回答：\n${visibleAnswer(turn.answer || '') || turn.answer || ''}`);
   }
+  const attachmentText = hasAggregateAttachment
+    ? '如果有附图，附图是一个 cat x.jpg att.zip > xa.jpg 生成的图片，你应该先解压出附件。附件内部是多个zip，1.zip是用户第一次提问时的附件打包zip，2.zip是第二次提问，以此类推；没有附件的轮次不会存在对应的zip。'
+    : '';
+  return `这是一次用户的追问，内容是 ${current.question}，${attachmentText}之前的提问/回答历史为：\n\n${history.join('\n\n')}`;
+}
 
-  start() {
-    this.database.resetInterrupted();
-    for (const task of this.database.listUnfinishedTasks()) this.enqueue(task.chatId, task.turnNo, task.taskToken);
-  }
+function numberName(n) {
+  const names = ['零','一','二','三','四','五','六','七','八','九','十'];
+  return n <= 10 ? names[n] : String(n);
+}
 
-  enqueue(chatId, turnNo, taskToken) {
-    if (this.stopping) return;
-    const key = taskKey(chatId, turnNo);
-    const queued = this.queued.get(key);
-    if (queued?.taskToken === taskToken || this.active.get(key)?.taskToken === taskToken) return;
-    if (queued) this.queue = this.queue.filter((task) => taskKey(task.chatId, task.turnNo) !== key);
-    const task = { chatId, turnNo, taskToken };
-    this.queue.push(task);
-    this.queued.set(key, task);
-    this.pump();
-  }
+export function createWorker({ config, db, storage, emitUpdate }) {
+  const running = new Map();
+  let pumping = false;
 
-  pump() {
-    while (!this.stopping && this.active.size < this.config.limits.maxParallelTasks && this.queue.length) {
-      const task = this.queue.shift();
-      const key = taskKey(task.chatId, task.turnNo);
-      this.queued.delete(key);
-      const current = this.database.getTurn(task.chatId, task.turnNo);
-      if (!current || current.taskToken !== task.taskToken) continue;
-      const controller = new AbortController();
-      const promise = this.run(task, controller)
-        .catch((error) => console.error(`[worker:${key}]`, error))
-        .finally(() => {
-          const active = this.active.get(key);
-          if (active?.taskToken === task.taskToken) this.active.delete(key);
-          this.pump();
-        });
-      this.active.set(key, { ...task, controller, promise });
-    }
-  }
-
-  async run(task, controller) {
-    const { chatId, turnNo, taskToken } = task;
-    const original = this.database.getConversationInternal(chatId);
-    const turn = original?.turns.find((candidate) => candidate.turnNo === turnNo);
-    if (!original || !turn || turn.taskToken !== taskToken) return;
-    const model = this.config.models.find((candidate) => candidate.id === original.chat.modelId);
-    if (!model) {
-      const message = `配置中已找不到模型：${original.chat.modelId}`;
-      this.database.markFailed(chatId, turnNo, taskToken, message);
-      await appendTextEvent(this.config.chatDir, chatId, {
-        type: 'attempt_error', turnNumber: turnNo, attemptId: null, error: message, createdAt: new Date().toISOString(),
-      }).catch(() => {});
-      this.events.emit(chatId, { type: 'turn_status', turnNo, status: 'failed', error: message });
-      return;
-    }
-
-    let writer = null;
-    let attemptId = null;
-    let deltaSequence = 0;
+  async function compressTurn(turn, signal) {
+    const finalPath = storage.attachmentPath(turn.conversation_id, turn.turn_no);
     try {
-      if (!this.database.markPreparing(chatId, turnNo, taskToken)) return;
-      this.events.emit(chatId, { type: 'turn_status', turnNo, status: 'preparing' });
-
-      let currentTurn = this.database.getTurn(chatId, turnNo);
-      if (!currentTurn.attachmentReady) {
-        const archive = await compressPendingTurnAttachments({
-          chatDir: this.config.chatDir,
-          chatId,
-          turnNumber: turnNo,
-          archiveVersion: original.chat.archiveVersion,
-          maxBytes: this.config.limits.maxCompressedAttachmentBytes,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) throw Object.assign(new Error('任务已取消'), { name: 'AbortError' });
-        if (!this.database.markAttachmentReady(chatId, turnNo, taskToken, currentTurn.hasAttachments ? archive.bytes : 0)) return;
-        this.database.markArchiveVersion(chatId, 2);
-        this.events.emit(chatId, {
-          type: 'attachment_ready', turnNo, attachmentBytes: currentTurn.hasAttachments ? archive.bytes : 0,
-        });
-        currentTurn = this.database.getTurn(chatId, turnNo);
+      const stat = await fs.promises.stat(finalPath);
+      if (stat.size > 0) {
+        db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'compressing', now(), { attachment_ready: 1, attachment_size: stat.size });
+        if (turn.upload_id) await cleanupUpload(turn.upload_id, turn.conversation_id, turn.turn_no);
+        return finalPath;
       }
+    } catch {}
+    if (!turn.upload_id) throw new Error('本轮附件不存在，无法继续处理');
+    const upload = db.getUpload(turn.upload_id);
+    if (!upload || upload.status !== 'bound') throw new Error('本轮上传暂存已丢失');
+    const files = db.listUploadFiles(turn.upload_id);
+    if (!files.length || files.some((file) => file.status !== 'complete' || file.received_size !== file.size)) throw new Error('本轮附件尚未完整上传');
+    const sourceDir = path.join(storage.uploadPath(turn.upload_id), 'files');
+    const work = storage.workPath(turn.conversation_id, turn.turn_no, turn.attempt);
+    await removePath(work);
+    await ensureDir(work);
+    const tempZip = path.join(work, 'turn.zip');
+    await runCommand('zip', ['-9', '-q', '-r', tempZip, '.'], { cwd: sourceDir, signal });
+    const stat = await fs.promises.stat(tempZip);
+    if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`本轮附件压缩后为 ${stat.size} 字节，超过 70,000,000 字节限制`);
+    await fs.promises.rename(tempZip, finalPath);
+    db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'compressing', now(), { attachment_ready: 1, attachment_size: stat.size, upload_id: null });
+    await cleanupUpload(turn.upload_id, turn.conversation_id, turn.turn_no);
+    await removePath(work);
+    return finalPath;
+  }
 
-      const currentConversation = this.database.getConversationInternal(chatId);
-      const textConversation = await readConversation(this.config.chatDir, chatId);
-      const turns = mergedTurns(currentConversation.turns, textConversation.turns);
-      const current = turns.find((candidate) => candidate.turnNo === turnNo);
-      if (!current) throw new Error('找不到当前轮次文本');
-      const previous = turns.filter((candidate) => candidate.turnNo < turnNo);
-      const throughCurrent = turns.filter((candidate) => candidate.turnNo <= turnNo);
-      const hasAnyAttachments = throughCurrent.some((candidate) => candidate.hasAttachments);
-      const providerPrompt = buildProviderPrompt({
-        turnNo,
-        currentPrompt: current.prompt,
-        history: previous,
-        hasAnyAttachments,
-      });
+  async function cleanupUpload(uploadId) {
+    await removePath(storage.uploadPath(uploadId));
+    db.transaction(() => {
+      db.raw.prepare('UPDATE turns SET upload_id=NULL WHERE upload_id=?').run(uploadId);
+      db.deleteUpload(uploadId);
+    });
+  }
 
-      if (hasAnyAttachments && currentConversation.chat.archiveVersion < 2) {
-        await ensureConversationArchiveV2({
-          chatDir: this.config.chatDir,
-          chatId,
-          throughTurn: turnNo,
-          archiveVersion: currentConversation.chat.archiveVersion,
-          maxBytes: this.config.limits.maxCompressedAttachmentBytes,
-          signal: controller.signal,
-        });
-        this.database.markArchiveVersion(chatId, 2);
+  async function buildAggregate(turn, signal) {
+    const turns = db.listTurns(turn.conversation_id).filter((item) => item.turn_no <= turn.turn_no && item.attachment_ready === 1);
+    if (!turns.length) return null;
+    const work = storage.workPath(turn.conversation_id, turn.turn_no, turn.attempt);
+    const stage = path.join(work, 'aggregate');
+    await removePath(work);
+    await ensureDir(stage);
+    const names = [];
+    for (const item of turns) {
+      const source = storage.attachmentPath(item.conversation_id, item.turn_no);
+      const name = `${item.turn_no}.zip`;
+      const dest = path.join(stage, name);
+      try { await fs.promises.link(source, dest); }
+      catch { await fs.promises.copyFile(source, dest); }
+      names.push(name);
+    }
+    const aggregate = path.join(work, 'att.zip');
+    await runCommand('zip', ['-9', '-q', aggregate, ...names], { cwd: stage, signal });
+    const stat = await fs.promises.stat(aggregate);
+    if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`全部轮次附件压缩后为 ${stat.size} 字节，超过 70,000,000 字节限制`);
+    return { aggregate, work };
+  }
+
+  async function processTurn(initial) {
+    const key = `${initial.conversation_id}:${initial.turn_no}`;
+    const controller = new AbortController();
+    let resolveDone;
+    const done = new Promise((resolve) => { resolveDone = resolve; });
+    running.set(key, { controller, attempt: initial.attempt, done });
+    let workToDelete = null;
+    try {
+      let turn = db.getTurn(initial.conversation_id, initial.turn_no);
+      if (!turn || turn.status !== 'pending' || turn.attempt !== initial.attempt) return;
+      if (turn.has_attachments && !turn.attachment_ready) {
+        db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'compressing', now());
+        emitUpdate(turn.conversation_id);
+        await compressTurn(turn, controller.signal);
       }
-      if (controller.signal.aborted) throw Object.assign(new Error('任务已取消'), { name: 'AbortError' });
+      turn = db.getTurn(initial.conversation_id, initial.turn_no);
+      if (!turn || turn.attempt !== initial.attempt) return;
+      if (turn.attachment_ready && turn.upload_id) {
+        await cleanupUpload(turn.upload_id);
+        turn = db.getTurn(initial.conversation_id, initial.turn_no);
+        if (!turn || turn.attempt !== initial.attempt) return;
+      }
+      db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'generating', now());
+      const textData = await storage.readText(turn.conversation_id);
+      const target = turnText(textData, turn.turn_no);
+      if (!target) throw new Error('文字记录损坏：找不到当前轮次');
+      target.answer = '';
+      target.updatedAt = now();
+      await storage.writeText(turn.conversation_id, textData);
+      emitUpdate(turn.conversation_id);
 
-      attemptId = randomUUID();
-      if (!this.database.markRunning(chatId, turnNo, taskToken, attemptId)) return;
-      writer = await createTextEventWriter(this.config.chatDir, chatId);
-      await writer.write({
-        type: 'attempt_start', turnNumber: turnNo, attemptId,
-        createdAt: new Date().toISOString(),
-        attachmentInstruction: hasAnyAttachments ? ATTACHMENT_INSTRUCTION : '',
-      });
-      this.events.emit(chatId, { type: 'turn_status', turnNo, status: 'running', attemptId });
-
+      const aggregateInfo = await buildAggregate(turn, controller.signal);
+      workToDelete = aggregateInfo?.work || null;
+      const prompt = buildPrompt(textData, turn.turn_no, Boolean(aggregateInfo));
+      let full = '';
+      let lastFlush = 0;
       await callProvider({
-        config: this.config,
-        model,
-        prompt: providerPrompt,
-        attachmentPath: hasAnyAttachments ? attachmentBinPath(this.config.chatDir, chatId) : null,
-        hasAttachments: hasAnyAttachments,
+        config,
+        model: turn.model_id,
+        prompt,
+        imagePaths: aggregateInfo ? [path.join(storage.chatDir, '..', 'server', 'assets', 'a.jpg'), aggregateInfo.aggregate] : [],
         signal: controller.signal,
-        onDelta: async (text) => {
-          const latest = this.database.getTurn(chatId, turnNo);
-          if (!latest || latest.taskToken !== taskToken) return;
-          deltaSequence += 1;
-          await writer.write({
-            type: 'assistant_delta', turnNumber: turnNo, attemptId,
-            sequence: deltaSequence, text, createdAt: new Date().toISOString(),
-          });
-          this.events.emit(chatId, { type: 'delta', turnNo, attemptId, sequence: deltaSequence, text });
+        onRequestBodySent: async () => {
+          if (workToDelete) {
+            const target = workToDelete;
+            workToDelete = null;
+            await removePath(target);
+          }
         },
+        onChunk: async (chunk) => {
+          full += chunk;
+          const current = db.getTurn(turn.conversation_id, turn.turn_no);
+          if (!current || current.attempt !== turn.attempt || current.status !== 'generating') throw new DOMException('Aborted', 'AbortError');
+          const stamp = now();
+          if (stamp - lastFlush >= 500) {
+            const latest = await storage.readText(turn.conversation_id);
+            const item = turnText(latest, turn.turn_no);
+            if (item) { item.answer = full; item.updatedAt = stamp; await storage.writeText(turn.conversation_id, latest); }
+            lastFlush = stamp;
+            emitUpdate(turn.conversation_id);
+          }
+        }
       });
-
-      const latest = this.database.getTurn(chatId, turnNo);
-      if (!latest || latest.taskToken !== taskToken) return;
-      await writer.write({ type: 'attempt_done', turnNumber: turnNo, attemptId, createdAt: new Date().toISOString() });
-      await writer.close();
-      writer = null;
-      this.database.markCompleted(chatId, turnNo, taskToken);
-      this.events.emit(chatId, { type: 'turn_status', turnNo, status: 'completed', attemptId });
+      const latest = await storage.readText(turn.conversation_id);
+      const item = turnText(latest, turn.turn_no);
+      if (item) { item.answer = full; item.updatedAt = now(); await storage.writeText(turn.conversation_id, latest); }
+      const current = db.getTurn(turn.conversation_id, turn.turn_no);
+      if (current && current.attempt === turn.attempt) db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'completed', now());
+      emitUpdate(turn.conversation_id);
     } catch (error) {
-      const reason = controller.signal.aborted ? controller.signal.reason : null;
-      const latest = this.database.getTurn(chatId, turnNo);
-      if (['shutdown', 'deleted', 'edited'].includes(reason) || !latest || latest.taskToken !== taskToken) return;
-      const message = redactProviderSecrets(error?.message || error, this.config);
-      const errorEvent = {
-        type: 'attempt_error', turnNumber: turnNo, attemptId,
-        error: message, createdAt: new Date().toISOString(),
-      };
-      if (writer) await writer.write(errorEvent).catch(() => {});
-      else await appendTextEvent(this.config.chatDir, chatId, errorEvent).catch(() => {});
-      this.database.markFailed(chatId, turnNo, taskToken, message);
-      this.events.emit(chatId, { type: 'turn_status', turnNo, status: 'failed', attemptId, error: message });
+      if (error?.name !== 'AbortError') {
+        const current = db.getTurn(initial.conversation_id, initial.turn_no);
+        if (current && current.attempt === initial.attempt) {
+          const message = redactSecrets(error?.message || String(error), config);
+          const textData = await storage.readText(initial.conversation_id).catch(() => null);
+          const item = textData && turnText(textData, initial.turn_no);
+          if (item) { item.answer = message; item.updatedAt = now(); await storage.writeText(initial.conversation_id, textData); }
+          db.updateTurnStatus(initial.conversation_id, initial.turn_no, 'error', now());
+          emitUpdate(initial.conversation_id);
+        }
+      }
     } finally {
-      await writer?.close().catch((error) => console.error(`[worker:${chatId}:${turnNo}] writer close failed`, error));
+      if (workToDelete) await removePath(workToDelete);
+      await removePath(storage.workPath(initial.conversation_id, initial.turn_no, initial.attempt));
+      running.delete(key);
+      resolveDone();
+      setImmediate(pump);
     }
   }
 
-  async cancelTask(chatId, turnNo, reason = 'deleted') {
-    const key = taskKey(chatId, turnNo);
-    this.queue = this.queue.filter((task) => taskKey(task.chatId, task.turnNo) !== key);
-    this.queued.delete(key);
-    const active = this.active.get(key);
-    if (active) {
-      active.controller.abort(reason);
-      await active.promise.catch(() => {});
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      const capacity = config.limits.maxConcurrentTasks - running.size;
+      if (capacity <= 0) return;
+      const pending = db.listPending(capacity * 2);
+      for (const turn of pending) {
+        const key = `${turn.conversation_id}:${turn.turn_no}`;
+        if (running.has(key) || running.size >= config.limits.maxConcurrentTasks) continue;
+        processTurn(turn);
+      }
+    } finally { pumping = false; }
+  }
+
+  async function cancelConversation(conversationId, fromTurn = 1) {
+    const waits = [];
+    for (const [key, task] of running) {
+      const [id, turnTextNo] = key.split(':');
+      if (id === conversationId && Number(turnTextNo) >= fromTurn) {
+        task.controller.abort();
+        waits.push(task.done);
+      }
     }
+    await Promise.allSettled(waits);
   }
 
-  async cancelFrom(chatId, fromTurnNo, reason = 'edited') {
-    const turnNumbers = new Set([
-      ...this.queue.filter((task) => task.chatId === chatId && task.turnNo >= fromTurnNo).map((task) => task.turnNo),
-      ...[...this.active.values()].filter((task) => task.chatId === chatId && task.turnNo >= fromTurnNo).map((task) => task.turnNo),
-    ]);
-    await Promise.all([...turnNumbers].map((turnNo) => this.cancelTask(chatId, turnNo, reason)));
-  }
-
-  async cancel(chatId, reason = 'deleted') {
-    await this.cancelFrom(chatId, 1, reason);
-  }
-
-  async cancelMany(ids, reason = 'deleted') {
-    await Promise.all([...ids].map((id) => this.cancel(id, reason)));
-  }
-
-  async cancelAll(reason = 'deleted') {
-    const ids = new Set([
-      ...this.queue.map((task) => task.chatId),
-      ...[...this.active.values()].map((task) => task.chatId),
-    ]);
-    await this.cancelMany(ids, reason);
-  }
-
-  async stop() {
-    this.stopping = true;
-    await this.cancelAll('shutdown');
-  }
+  return { pump, cancelConversation, running };
 }

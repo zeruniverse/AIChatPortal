@@ -1,37 +1,26 @@
 import { createApp } from 'vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import App from './App.vue';
-import LoginPage from './views/LoginPage.vue';
-import NewChat from './views/NewChat.vue';
-import HistoryPage from './views/HistoryPage.vue';
-import ChatDetail from './views/ChatDetail.vue';
-import PublicShare from './views/PublicShare.vue';
-import { ensureAuthenticated } from './state.js';
+import LoginView from './views/LoginView.vue';
+import HistoryView from './views/HistoryView.vue';
+import NewView from './views/NewView.vue';
+import ConversationView from './views/ConversationView.vue';
+import ShareView from './views/ShareView.vue';
+import { authState, initAuth } from './auth.js';
 import './styles.css';
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes: [
-    { path: '/login', name: 'login', component: LoginPage, meta: { public: true, bare: true } },
-    { path: '/share/:shareToken', name: 'share', component: PublicShare, meta: { public: true, bare: true } },
-    { path: '/', name: 'new', component: NewChat },
-    { path: '/history', name: 'history', component: HistoryPage },
-    { path: '/chat/:id', name: 'chat', component: ChatDetail },
-    { path: '/:pathMatch(.*)*', redirect: '/' },
-  ],
-  scrollBehavior: () => ({ top: 0 }),
-});
-
+const routes = [
+  { path: '/login', component: LoginView, meta: { public: true } },
+  { path: '/share/:token', component: ShareView, meta: { public: true } },
+  { path: '/', component: HistoryView },
+  { path: '/new', component: NewView },
+  { path: '/chat/:id', component: ConversationView }
+];
+const router = createRouter({ history: createWebHistory(), routes, scrollBehavior: () => ({ top: 0 }) });
 router.beforeEach(async (to) => {
-  if (to.name === 'share') return true;
-  const authenticated = await ensureAuthenticated();
-  if (to.name === 'login') return authenticated ? { name: 'new' } : true;
-  if (authenticated) return true;
-  return {
-    name: 'login',
-    query: { redirect: to.fullPath },
-    replace: true,
-  };
+  await initAuth();
+  if (to.meta.public) return true;
+  if (!authState.authenticated) return { path: '/login', query: { redirect: to.fullPath } };
+  return true;
 });
-
 createApp(App).use(router).mount('#app');

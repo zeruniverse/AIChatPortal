@@ -1,65 +1,17 @@
 <script setup>
-import { computed, watch } from 'vue';
-import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
-import { appState, loadAppConfig, logout } from './state.js';
-
-const route = useRoute();
-const router = useRouter();
-const privateLayout = computed(() => !route.meta.public);
-
-watch(
-  () => route.fullPath,
-  () => {
-    if (privateLayout.value && appState.user) loadAppConfig().catch(() => {});
-  },
-  { immediate: true },
-);
-
-async function signOut() {
-  await logout();
-  await router.replace('/login');
-}
+import { computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { authState, logout } from './auth.js';
+const route = useRoute(); const router = useRouter();
+const showNav = computed(() => authState.authenticated && !route.meta.public);
+async function signOut() { await logout(); router.replace('/login'); }
 </script>
-
 <template>
-  <div class="app-shell" :class="{ 'public-shell': !privateLayout }">
-    <aside v-if="privateLayout" class="desktop-sidebar" aria-label="主导航">
-      <RouterLink class="brand" to="/" aria-label="模型问答首页">
-        <span class="brand-mark">M</span>
-        <span><strong>模型问答</strong><small>多轮 · 本地存储</small></span>
-      </RouterLink>
-      <nav class="sidebar-nav">
-        <RouterLink to="/" exact-active-class="active"><span>＋</span>新对话</RouterLink>
-        <RouterLink to="/history" active-class="active"><span>⌕</span>对话历史</RouterLink>
-      </nav>
-      <div class="sidebar-account">
-        <strong>{{ appState.user?.label }}</strong>
-        <small>不同 token 的记录互相隔离</small>
-        <button type="button" @click="signOut">退出登录</button>
-      </div>
-      <div class="sidebar-note">
-        <span class="privacy-dot"></span>
-        <p>关闭页面不会停止已提交任务。任务状态保存在服务器本地。</p>
-      </div>
-    </aside>
-
-    <main class="main-panel">
-      <header v-if="privateLayout" class="mobile-header">
-        <RouterLink class="mobile-brand" to="/">
-          <span class="brand-mark">M</span><strong>模型问答</strong>
-        </RouterLink>
-        <button class="mobile-logout" type="button" @click="signOut">退出</button>
-      </header>
-      <div v-if="privateLayout && appState.error" class="global-error" role="alert">
-        {{ appState.error }}
-        <button type="button" @click="loadAppConfig(true).catch(() => {})">重试</button>
-      </div>
-      <RouterView />
-    </main>
-
-    <nav v-if="privateLayout" class="mobile-nav" aria-label="移动端主导航">
-      <RouterLink to="/" exact-active-class="active"><span>＋</span><small>新对话</small></RouterLink>
-      <RouterLink to="/history" active-class="active"><span>⌕</span><small>历史</small></RouterLink>
-    </nav>
+  <div class="app-shell">
+    <header v-if="showNav" class="topbar">
+      <router-link to="/" class="brand">模型聊天</router-link>
+      <nav><router-link to="/">历史</router-link><router-link to="/new">提问</router-link><button type="button" class="link-button" @click="signOut">退出</button></nav>
+    </header>
+    <router-view />
   </div>
 </template>

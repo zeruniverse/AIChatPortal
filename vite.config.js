@@ -1,19 +1,17 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import path from 'node:path';
 
 export default defineConfig({
-  root: 'frontend',
+  root: path.resolve('frontend'),
   plugins: [vue()],
   build: {
-    outDir: '../dist',
+    outDir: path.resolve('dist'),
     emptyOutDir: true,
-    sourcemap: false,
+    sourcemap: false
   },
   server: {
-    host: '0.0.0.0',
     port: 5173,
-    proxy: {
-      '/api': 'http://127.0.0.1:3000',
-    },
-  },
+    proxy: { '/api': 'http://localhost:3000' }
+  }
 });

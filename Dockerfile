@@ -1,29 +1,21 @@
-FROM node:24-bookworm-slim AS build
+FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /app
 COPY package.json ./
 RUN npm install --no-audit --no-fund
 COPY vite.config.js ./
 COPY frontend ./frontend
 RUN npm run build
-RUN npm prune --omit=dev
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates gosu zip unzip \
+    && apt-get install -y --no-install-recommends zip unzip ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/node_modules ./node_modules
 COPY package.json ./
 COPY server ./server
-COPY --from=build /app/dist ./dist
+COPY --from=frontend-build /app/dist ./dist
 COPY config.example.json ./config.example.json
-RUN cp config.example.json config.json
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
-    && mkdir -p /app/chat \
-    && chown -R node:node /app
-VOLUME ["/app/chat"]
+RUN mkdir -p /app/chat
 EXPOSE 3000
-ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server/app.js"]
