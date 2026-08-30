@@ -26,7 +26,7 @@ function turnText(textData, turnNo) {
   return textData.turns.find((turn) => turn.turnNo === turnNo);
 }
 
-function buildPrompt(textData, turnNo, hasAggregateAttachment) {
+function buildPrompt(textData, turnNo) {
   const current = turnText(textData, turnNo);
   if (turnNo === 1) return current.question;
   const history = [];
@@ -34,10 +34,7 @@ function buildPrompt(textData, turnNo, hasAggregateAttachment) {
     history.push(`第${numberName(turn.turnNo)}次提问：\n${turn.question}`);
     history.push(`第${numberName(turn.turnNo)}次回答：\n${visibleAnswer(turn.answer || '') || turn.answer || ''}`);
   }
-  const attachmentText = hasAggregateAttachment
-    ? '如果有附图，附图是一个 cat x.jpg att.zip > xa.jpg 生成的图片，你应该先解压出附件。附件内部是多个zip，1.zip是用户第一次提问时的附件打包zip，2.zip是第二次提问，以此类推；没有附件的轮次不会存在对应的zip。'
-    : '';
-  return `这是一次用户的追问，内容是 ${current.question}，${attachmentText}之前的提问/回答历史为：\n\n${history.join('\n\n')}`;
+  return `这是一次用户的追问，内容是 ${current.question}。之前的提问/回答历史为：\n\n${history.join('\n\n')}`;
 }
 
 function numberName(n) {
@@ -143,7 +140,7 @@ export function createWorker({ config, db, storage, emitUpdate }) {
 
       const aggregateInfo = await buildAggregate(turn, controller.signal);
       workToDelete = aggregateInfo?.work || null;
-      const prompt = buildPrompt(textData, turn.turn_no, Boolean(aggregateInfo));
+      const prompt = buildPrompt(textData, turn.turn_no);
       let full = '';
       let lastFlush = 0;
       await callProvider({

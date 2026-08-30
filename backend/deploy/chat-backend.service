@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenAI Compatible Chat Backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=chatapp
+Group=chatapp
+WorkingDirectory=/opt/chat-backend
+Environment=NODE_ENV=production
+Environment=CONFIG_PATH=/opt/chat-backend/config.json
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node /opt/chat-backend/server/app.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

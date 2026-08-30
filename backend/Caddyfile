@@ -1,0 +1,20 @@
+{
+    email admin@example.com
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+api.example.com {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+    }
+
+    @api path /api/*
+    handle @api {
+        reverse_proxy 127.0.0.1:3000
+    }
+
+    handle {
+        redir https://your-project.pages.dev{uri} 308
+    }
+}

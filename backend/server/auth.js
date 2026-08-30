@@ -12,14 +12,19 @@ function parseCookies(header = '') {
 
 export function createAuth(config) {
   const usersById = new Map(config.auth.users.map((u) => [u.id, u]));
+
   function findByToken(token) {
-    for (const user of config.auth.users) if (timingSafeEqualText(user.token, token || '')) return user;
+    for (const user of config.auth.users) {
+      if (timingSafeEqualText(user.token, token || '')) return user;
+    }
     return null;
   }
+
   function encodeSession(user) {
     const payload = Buffer.from(JSON.stringify({ uid: user.id, fp: sha256(user.token).slice(0, 24) })).toString('base64url');
     return `${payload}.${hmac(config.auth.sessionSecret, payload)}`;
   }
+
   function decodeSession(value) {
     if (!value || !value.includes('.')) return null;
     const [payload, signature] = value.split('.', 2);
@@ -31,14 +36,26 @@ export function createAuth(config) {
       return user;
     } catch { return null; }
   }
+
+  function bearerUser(req) {
+    const header = String(req.headers.authorization || '');
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    return match ? findByToken(match[1]) : null;
+  }
+
   function currentUser(req) {
+    const bearer = bearerUser(req);
+    if (bearer) return bearer;
     const cookies = parseCookies(req.headers.cookie || '');
     return decodeSession(cookies[config.auth.cookieName]);
   }
+
   function cookie(value, clear = false) {
     const parts = [`${config.auth.cookieName}=${encodeURIComponent(value || '')}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
-    if (clear) parts.push('Max-Age=0'); else parts.push(`Max-Age=${60 * 60 * 24 * 3650}`);
+    if (clear) parts.push('Max-Age=0');
+    else parts.push(`Max-Age=${60 * 60 * 24 * 3650}`);
     return parts.join('; ');
   }
+
   return { findByToken, currentUser, encodeSession, cookie };
 }

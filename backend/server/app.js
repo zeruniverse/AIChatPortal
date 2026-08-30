@@ -9,7 +9,7 @@ import { createDb } from './db.js';
 import { createAuth } from './auth.js';
 import { createWorker } from './worker.js';
 import { migrateLegacyStorage } from './migration.js';
-import { contentDisposition, ensureDir, isTerminal, json, now, pathSize, randomId, randomToken, readJson, removePath, safeFilename, text, titleFromQuestion } from './utils.js';
+import { contentDisposition, ensureDir, hmac, isTerminal, json, now, pathSize, randomId, randomToken, readJson, removePath, safeFilename, timingSafeEqualText, titleFromQuestion } from './utils.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = loadConfig(rootDir);
@@ -37,15 +37,29 @@ async function withConversationLock(conversationId, fn) {
 }
 
 function setSecurityHeaders(res) {
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; media-src 'self' data: blob: http: https:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.removeHeader('Cross-Origin-Opener-Policy');
-  res.removeHeader('Cross-Origin-Embedder-Policy');
-  res.removeHeader('Origin-Agent-Cluster');
-  res.removeHeader('Strict-Transport-Security');
+}
+
+function originAllowed(origin) {
+  if (!origin) return true;
+  return config.cors.allowedOrigins.includes(origin);
+}
+
+function applyCors(req, res) {
+  const origin = String(req.headers.origin || '');
+  if (origin && !originAllowed(origin)) return false;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return true;
 }
 
 function emitUpdate(conversationId) {
@@ -189,7 +203,7 @@ async function streamDownload(res, filePath, filename) {
 
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
-  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, version: '6.0.2' });
+  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, version: '7.0.2' });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, { models: config.models, limits: { maxFilesPerTurn: config.limits.maxFilesPerTurn, maxCompressedAttachmentBytes: config.limits.maxCompressedAttachmentBytes } });
   if (req.method === 'GET' && pathname === '/api/auth/me') {
     const user = auth.currentUser(req);
@@ -199,9 +213,9 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     const user = auth.findByToken(body.token);
     if (!user) return json(res, 401, { error: 'token 无效' });
-    return json(res, 200, { authenticated: true, user: { id: user.id, label: user.label || user.id } }, { 'Set-Cookie': auth.cookie(auth.encodeSession(user)) });
+    return json(res, 200, { authenticated: true, user: { id: user.id, label: user.label || user.id } });
   }
-  if (req.method === 'POST' && pathname === '/api/auth/logout') return json(res, 200, { ok: true }, { 'Set-Cookie': auth.cookie('', true) });
+  if (req.method === 'POST' && pathname === '/api/auth/logout') return json(res, 200, { ok: true });
 
   let match;
   if (req.method === 'POST' && pathname === '/api/uploads') {
@@ -413,13 +427,24 @@ async function handleApi(req, res, url) {
     if (!conversation) return json(res, 404, { error: '对话不存在' });
     return addSse(req, res, conversation, false, null);
   }
+  if (req.method === 'GET' && (match = pathname.match(/^\/api\/conversations\/([^/]+)\/turns\/(\d+)\/attachments-link$/))) {
+    const user = userOr401(req, res); if (!user) return;
+    const conversation = db.getOwnedConversation(match[1], user.id); const turnNo = Number(match[2]);
+    if (!conversation) return json(res, 404, { error: '对话不存在' });
+    const turn = db.getTurn(conversation.id, turnNo);
+    if (!turn?.has_attachments) return json(res, 404, { error: '本轮没有附件' });
+    if (!turn.attachment_ready) return json(res, 409, { error: '本轮附件仍在处理，暂不可下载' });
+    const expires = Date.now() + 5 * 60_000;
+    const signature = hmac(config.auth.sessionSecret, `${conversation.id}|${turnNo}|${expires}`);
+    return json(res, 200, { url: `/api/downloads/${conversation.id}/turns/${turnNo}/attachments?expires=${expires}&sig=${encodeURIComponent(signature)}` });
+  }
   if (req.method === 'GET' && (match = pathname.match(/^\/api\/conversations\/([^/]+)\/turns\/(\d+)\/attachments$/))) {
     const user = userOr401(req, res); if (!user) return;
     const conversation = db.getOwnedConversation(match[1], user.id); const turnNo = Number(match[2]);
     if (!conversation) return json(res, 404, { error: '对话不存在' });
     const turn = db.getTurn(conversation.id, turnNo);
     if (!turn?.has_attachments) return json(res, 404, { error: '本轮没有附件' });
-    if (!turn.attachment_ready) return json(res, 409, { error: '本轮附件仍在压缩，暂不可下载' });
+    if (!turn.attachment_ready) return json(res, 409, { error: '本轮附件仍在处理，暂不可下载' });
     return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), `conversation-${conversation.id}-turn-${turnNo}-attachments.zip`);
   }
   if (req.method === 'DELETE' && pathname === '/api/conversations') {
@@ -434,6 +459,18 @@ async function handleApi(req, res, url) {
     if (!conversation) return json(res, 404, { error: '对话不存在' });
     await deleteConversationFully(conversation.id);
     return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && (match = pathname.match(/^\/api\/downloads\/([^/]+)\/turns\/(\d+)\/attachments$/))) {
+    const conversation = db.getConversation(match[1]); const turnNo = Number(match[2]);
+    const expires = Number(url.searchParams.get('expires'));
+    const signature = String(url.searchParams.get('sig') || '');
+    if (!conversation || !Number.isSafeInteger(expires) || expires < Date.now() || !signature) return json(res, 404, { error: '下载链接已失效' });
+    const expected = hmac(config.auth.sessionSecret, `${conversation.id}|${turnNo}|${expires}`);
+    if (!timingSafeEqualText(expected, signature)) return json(res, 404, { error: '下载链接已失效' });
+    const turn = db.getTurn(conversation.id, turnNo);
+    if (!turn?.has_attachments || !turn.attachment_ready) return json(res, 404, { error: '附件不存在' });
+    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), `conversation-${conversation.id}-turn-${turnNo}-attachments.zip`);
   }
 
   if (req.method === 'GET' && (match = pathname.match(/^\/api\/public\/shares\/([^/]+)$/))) {
@@ -458,29 +495,14 @@ async function handleApi(req, res, url) {
   return json(res, 404, { error: '接口不存在' });
 }
 
-const mimeTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon' };
-async function serveStatic(res, pathname, headOnly = false) {
-  const dist = path.join(rootDir, 'dist');
-  let relative = decodeURIComponent(pathname).replace(/^\/+/, '');
-  let target = path.join(dist, relative || 'index.html');
-  const relativeTarget = path.relative(dist, target);
-  if (relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget)) return text(res, 403, 'Forbidden');
-  let stat;
-  try { stat = await fs.promises.stat(target); if (stat.isDirectory()) target = path.join(target, 'index.html'); }
-  catch { target = path.join(dist, 'index.html'); }
-  try { stat = await fs.promises.stat(target); }
-  catch { return text(res, 503, '前端尚未构建，请先运行 npm run build。'); }
-  res.writeHead(200, { 'Content-Type': mimeTypes[path.extname(target)] || 'application/octet-stream', 'Content-Length': stat.size, 'Cache-Control': path.basename(target) === 'index.html' ? 'no-cache' : 'public, max-age=31536000, immutable' });
-  if (headOnly) res.end(); else createReadStream(target).pipe(res);
-}
-
 const server = http.createServer(async (req, res) => {
   setSecurityHeaders(res);
+  if (!applyCors(req, res)) return json(res, 403, { error: 'Origin 不在允许列表中' });
+  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
-    else if (req.method === 'GET' || req.method === 'HEAD') await serveStatic(res, url.pathname, req.method === 'HEAD');
-    else json(res, 405, { error: 'Method Not Allowed' });
+    else json(res, 404, { error: '接口不存在' });
   } catch (error) {
     console.error(error);
     if (!res.headersSent) json(res, error.statusCode || 500, { error: error.statusCode ? error.message : '服务器内部错误' });
@@ -525,7 +547,7 @@ async function runCleanup() {
 }
 
 server.listen(config.port, config.host, () => {
-  console.log(`Chat app listening on http://${config.host}:${config.port}`);
+  console.log(`Chat backend listening on http://${config.host}:${config.port}`);
   worker.pump();
   runCleanup();
 });

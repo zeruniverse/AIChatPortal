@@ -1,6 +1,13 @@
 {
   "host": "0.0.0.0",
   "port": 3000,
+  "cors": {
+    "allowedOrigins": [
+      "https://your-project.pages.dev",
+      "https://chat.example.com",
+      "http://localhost:5173"
+    ]
+  },
   "auth": {
     "sessionSecret": "replace-with-at-least-32-random-characters",
     "cookieName": "chat_session",
@@ -9,12 +16,12 @@
       {
         "id": "user-1",
         "label": "用户一",
-        "token": "replace-with-a-long-user-token-1"
+        "token": "replace-with-a-long-access-code-1"
       },
       {
         "id": "user-2",
         "label": "用户二",
-        "token": "replace-with-a-long-user-token-2"
+        "token": "replace-with-a-long-access-code-2"
       }
     ]
   },

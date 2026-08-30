@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref } from 'vue';
-import { api } from '../api.js';
+import { addAuthHeader, api } from '../api.js';
+import { apiUrl } from '../runtimeConfig.js';
 
 const props = defineProps({ disabled: Boolean });
 const emit = defineEmits(['state']);
@@ -9,6 +10,7 @@ const uploadId = ref(null);
 const items = ref([]);
 const sessionCreating = ref(false);
 const controllers = new Map();
+let sessionPromise = null;
 let generation = 0;
 
 const busy = computed(() => sessionCreating.value || items.value.some((item) => ['registering','uploading','removing'].includes(item.status)));
@@ -17,14 +19,17 @@ function publish() { emit('state', { uploadId: uploadId.value, busy: busy.value,
 
 async function ensureSession() {
   if (uploadId.value) return uploadId.value;
+  if (sessionPromise) return sessionPromise;
   sessionCreating.value = true; publish();
-  try { const result = await api('/api/uploads', { method: 'POST' }); uploadId.value = result.id; return result.id; }
-  finally { sessionCreating.value = false; publish(); }
+  sessionPromise = api('/api/uploads', { method: 'POST' })
+    .then((result) => { uploadId.value = result.id; return result.id; })
+    .finally(() => { sessionCreating.value = false; sessionPromise = null; publish(); });
+  return sessionPromise;
 }
 
-async function choose(event) {
-  const files = [...event.target.files];
-  event.target.value = '';
+async function addFiles(fileList) {
+  if (props.disabled) return;
+  const files = [...(fileList || [])];
   if (!files.length) return;
   const session = await ensureSession();
   const currentGeneration = generation;
@@ -32,6 +37,12 @@ async function choose(event) {
     if (currentGeneration !== generation) break;
     await uploadOne(session, file, currentGeneration);
   }
+}
+
+async function choose(event) {
+  const files = [...event.target.files];
+  event.target.value = '';
+  await addFiles(files);
 }
 
 async function uploadOne(session, file, currentGeneration) {
@@ -44,8 +55,9 @@ async function uploadOne(session, file, currentGeneration) {
     await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       controllers.set(local.localId, xhr);
-      xhr.open('PUT', `/api/uploads/${session}/files/${registered.id}`);
-      xhr.withCredentials = true;
+      xhr.open('PUT', apiUrl(`/api/uploads/${session}/files/${registered.id}`));
+      const authHeaders = addAuthHeader();
+      if (authHeaders.Authorization) xhr.setRequestHeader('Authorization', authHeaders.Authorization);
       xhr.upload.onprogress = (event) => { if (event.lengthComputable) local.progress = Math.round(event.loaded / event.total * 100); publish(); };
       xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(JSON.parse(xhr.responseText || '{}').error || `HTTP ${xhr.status}`));
       xhr.onerror = () => reject(new Error('网络上传失败'));
@@ -88,7 +100,7 @@ function formatSize(size) {
 }
 
 onBeforeUnmount(() => { generation += 1; for (const xhr of controllers.values()) xhr.abort(); });
-defineExpose({ clearAll });
+defineExpose({ clearAll, addFiles });
 publish();
 </script>
 
@@ -99,7 +111,7 @@ publish();
       <button v-if="items.length" type="button" class="button ghost" :disabled="disabled || busy" @click="clearAll">清空附件</button>
       <input ref="input" class="visually-hidden" type="file" multiple @change="choose" />
     </div>
-    <p class="hint">附件上传完成后即可提交。</p>
+    <p class="hint">可选择附件，也可直接拖入问题框；上传完成后即可提交。</p>
     <div v-if="items.length" class="upload-list">
       <div v-for="item in items" :key="item.localId" class="upload-item">
         <div class="upload-main">

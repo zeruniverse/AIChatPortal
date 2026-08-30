@@ -1,278 +1,650 @@
-# OpenAI-compatible 文件聊天 Web App v6
+# OpenAI Compatible Chat v7.0.2 — 前后端分离、后端原生部署版
 
-Node.js 后端、Vue 3 前端、SQLite 索引和文件存储。应用可直接通过普通 HTTP 访问，后端可以调用 HTTP 或 HTTPS 的 OpenAI-compatible `/chat/completions` provider。
+本版部署结构：
 
-## 本版修复重点
-
-- 无附件轮次不再创建空 ZIP。三轮中只有第一、三轮有附件时，临时聚合包只包含 `1.zip` 和 `3.zip`。
-- 每轮附件永久保存为独立 ZIP，下载本轮附件时直接发送该文件。
-- 已删除“下载全部轮次附件”功能和接口。
-- 调用 provider 前临时创建外层 `att.zip`，请求体发送完毕后立即删除；失败或取消时也会删除。
-- 追问和编辑均可选择与此前不同的模型。
-- 用户选择附件后立即上传；所有文件上传完成前禁止提交。
-- 已提交的原始上传文件在本轮 ZIP 生成后立即删除；未提交的上传暂存 24 小时后删除。
-- CSP 允许回答中的远程 HTTP/HTTPS 图片。
-- 支持任意数量的 `<think>...</think>`，每个思考段按原始位置独立折叠；复制回答只复制所有非思考段，并用换行连接。
-- 编辑不再使用 `structuredClone`，避免 Vue Proxy 导致 `DataCloneError`。
-- 旧版外层附件包会在首次启动时迁移为逐轮附件；空的编号 ZIP 会被丢弃。
-
-## 部署
-
-### 1. 备份旧数据
-
-升级前必须停止旧容器：
-
-```bash
-docker compose down
-cp -a chat chat.backup-before-v6
-cp config.json config.json.backup-before-v6
+```text
+Cloudflare Pages（Vue 静态前端）
+        |
+        | HTTPS
+        v
+Caddy（服务器 80/443，Let's Encrypt 自动证书）
+        |
+        | HTTP，仅服务器本机
+        v
+Node.js 后端（127.0.0.1:3000）
+        |
+        v
+Model Provider（HTTP 或 HTTPS）
 ```
 
-不要让旧版和新版同时访问同一个 `chat/` 目录。
+后端不需要 Docker，也不需要数据库服务。数据继续存放在 `backend/chat/` 中的 SQLite 和附件文件。
 
-### 2. 配置
+---
 
-复制示例配置并编辑：
+## 1. 准备域名
+
+假设：
+
+- 前端：`https://your-project.pages.dev` 或 `https://chat.example.com`
+- 后端 API：`https://api.example.com`
+- 服务器公网 IP：`203.0.113.10`
+
+请先让 `api.example.com` 的 A/AAAA 记录正确指向后端服务器。
+
+服务器公网必须可以访问：
+
+- TCP 80
+- TCP 443
+
+Node 的 3000 端口不需要对公网开放。
+
+---
+
+## 2. 安装系统依赖
+
+以下以 Ubuntu/Debian 为例：
 
 ```bash
-cp config.example.json config.json
+sudo apt update
+sudo apt install -y curl ca-certificates zip unzip xz-utils
 ```
 
-至少替换：
+### 安装 Node.js
 
-- `auth.sessionSecret`
-- `auth.users[].token`
-- `provider.url`
-- `provider.key`
-- `models`
+要求：Node.js >= 22.5.0；推荐 Node.js 24 LTS。
 
-示例：
+安装完成后确认：
+
+```bash
+node -v
+```
+
+如果已经是 22.5.0 或更高，可以直接继续。
+
+生产环境建议使用系统级 Node 安装，使 systemd 可以直接找到 `node`，不要把生产服务依赖在交互式 shell 的 nvm 初始化脚本上。
+
+---
+
+## 3. 安装 Caddy
+
+Ubuntu/Debian 使用 Caddy 官方 apt 仓库：
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+sudo chmod o+r /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+```
+
+安装后 Caddy 会作为 systemd 服务运行。
+
+检查：
+
+```bash
+caddy version
+systemctl status caddy
+```
+
+---
+
+## 4. 上传后端程序
+
+建议目录：
+
+```text
+/opt/chat-backend
+```
+
+创建专用系统用户：
+
+```bash
+sudo useradd --system --home /opt/chat-backend --shell /usr/sbin/nologin chatapp 2>/dev/null || true
+sudo mkdir -p /opt/chat-backend
+```
+
+把本包的 `backend/` 内容上传/复制进去，例如：
+
+```bash
+sudo cp -a backend/. /opt/chat-backend/
+```
+
+然后设置权限：
+
+```bash
+sudo chown -R root:chatapp /opt/chat-backend
+sudo chown -R chatapp:chatapp /opt/chat-backend/chat
+sudo chmod 750 /opt/chat-backend
+sudo chmod 640 /opt/chat-backend/config.json
+```
+
+确认系统用户可以运行后端：
+
+```bash
+sudo -u chatapp /usr/bin/env node /opt/chat-backend/server/app.js
+```
+
+看到类似：
+
+```text
+Chat backend listening on http://127.0.0.1:3000
+```
+
+即可按 `Ctrl+C` 停止测试。
+
+---
+
+## 5. 配置后端 config.json
+
+编辑：
+
+```bash
+sudo nano /opt/chat-backend/config.json
+```
+
+生产部署建议把：
+
+```json
+"host": "127.0.0.1",
+"port": 3000
+```
+
+这样 Node 只监听服务器本机，不直接暴露 3000 端口。
+
+完整示例：
 
 ```json
 {
-  "host": "0.0.0.0",
+  "host": "127.0.0.1",
   "port": 3000,
+  "cors": {
+    "allowedOrigins": [
+      "https://your-project.pages.dev",
+      "https://chat.example.com"
+    ]
+  },
   "auth": {
-    "sessionSecret": "至少32字符的随机会话密钥",
+    "sessionSecret": "替换为至少32字符的高强度随机值",
     "cookieName": "chat_session",
     "legacyOwnerId": "user-1",
     "users": [
-      { "id": "user-1", "label": "用户一", "token": "足够长的登录token-1" },
-      { "id": "user-2", "label": "用户二", "token": "足够长的登录token-2" }
+      {
+        "id": "user-1",
+        "label": "用户一",
+        "token": "替换成用户访问码"
+      }
     ]
   },
   "provider": {
     "url": "https://provider.example.com/v1/chat/completions",
-    "key": "provider-key",
+    "key": "替换成 provider key",
     "headers": {},
     "extraBody": {}
   },
   "models": [
     { "id": "model-a", "label": "模型 A" },
     { "id": "model-b", "label": "模型 B" }
+  ],
+  "limits": {
+    "maxConcurrentTasks": 10,
+    "maxCompressedAttachmentBytes": 70000000,
+    "maxRawUploadBytesPerTurn": 0,
+    "maxFilesPerTurn": 100
+  },
+  "cleanup": {
+    "maxChatBytes": 3000000000,
+    "pressureAgeHours": 24,
+    "maxAgeDays": 7,
+    "orphanUploadHours": 24,
+    "intervalMinutes": 10
+  }
+}
+```
+
+生成 sessionSecret：
+
+```bash
+openssl rand -hex 32
+```
+
+生成访问码也可以用：
+
+```bash
+openssl rand -hex 24
+```
+
+注意 CORS Origin：
+
+```text
+https://your-project.pages.dev
+```
+
+不能写成：
+
+```text
+https://your-project.pages.dev/
+```
+
+末尾不要 `/`，也不要附带路径。
+
+---
+
+## 6. 用 systemd 运行 Node 后端
+
+本包已有模板：
+
+```text
+backend/deploy/chat-backend.service
+```
+
+安装：
+
+```bash
+sudo cp /opt/chat-backend/deploy/chat-backend.service /etc/systemd/system/chat-backend.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now chat-backend
+```
+
+检查：
+
+```bash
+systemctl status chat-backend
+```
+
+实时日志：
+
+```bash
+journalctl -u chat-backend -f
+```
+
+测试本机后端：
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
+预期：
+
+```json
+{"ok":true,"version":"7.0.2"}
+```
+
+以后后端服务器重启，systemd 会自动启动服务；Node 进程意外退出时也会自动重启。
+
+---
+
+## 7. 配置 Caddy HTTPS
+
+不要使用旧 Docker 版的：
+
+```text
+reverse_proxy backend:3000
+```
+
+原生部署必须改为：
+
+```text
+reverse_proxy 127.0.0.1:3000
+```
+
+本包 `backend/deploy/Caddyfile` 已经是原生服务器模板。
+
+编辑：
+
+```bash
+sudo nano /etc/caddy/Caddyfile
+```
+
+例如：
+
+```caddyfile
+{
+    email admin@example.com
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+api.example.com {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+    }
+
+    @api path /api/*
+    handle @api {
+        reverse_proxy 127.0.0.1:3000
+    }
+
+    handle {
+        redir https://your-project.pages.dev{uri} 308
+    }
+}
+```
+
+需要修改三处：
+
+1. `admin@example.com` → 证书通知邮箱
+2. `api.example.com` → 真实 API 域名
+3. `https://your-project.pages.dev` → 真实前端地址
+
+验证 Caddyfile：
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+无错误后：
+
+```bash
+sudo systemctl reload caddy
+```
+
+查看日志：
+
+```bash
+journalctl -u caddy -f
+```
+
+然后测试：
+
+```bash
+curl https://api.example.com/api/health
+```
+
+---
+
+## 8. Let's Encrypt 自动续期
+
+不需要安装 Certbot，也不需要创建 cron。
+
+Caddy 会自动完成：
+
+```text
+申请 Let's Encrypt 证书
+→ 保存证书
+→ 到期前自动续期
+→ 自动加载新证书
+```
+
+只要：
+
+- 域名一直解析到该服务器
+- 80/443 保持可访问
+- Caddy systemd 服务正常运行
+- 不删除 Caddy 的数据目录
+
+即可自动维护 HTTPS。
+
+Caddy 官方 apt 包默认的证书/状态数据通常保存在：
+
+```text
+/var/lib/caddy/.local/share/caddy
+```
+
+不要手工定期删除该目录。
+
+可以检查：
+
+```bash
+systemctl status caddy
+journalctl -u caddy --since today
+```
+
+---
+
+## 9. 防火墙
+
+如果使用 UFW：
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+可选 HTTP/3：
+
+```bash
+sudo ufw allow 443/udp
+```
+
+不要开放：
+
+```text
+3000/tcp
+```
+
+因为 Node 已监听：
+
+```text
+127.0.0.1:3000
+```
+
+检查：
+
+```bash
+sudo ss -lntp | grep -E ':80|:443|:3000'
+```
+
+应看到 Caddy 监听公网 80/443，而 Node 的 3000 只在 127.0.0.1。
+
+---
+
+## 10. 配置 Cloudflare Pages 前端
+
+编辑：
+
+```text
+frontend/public/config.json
+```
+
+只配置后端地址：
+
+```json
+{
+  "base_url": "https://api.example.com"
+}
+```
+
+不要加末尾 `/`。
+
+Cloudflare Pages：
+
+```text
+Root directory: frontend
+Build command: npm install --no-audit --no-fund && npm run build
+Build output directory: dist
+```
+
+推荐 Node 24。
+
+部署完成后，把最终 Pages Origin 加进后端：
+
+```json
+"cors": {
+  "allowedOrigins": [
+    "https://真实项目.pages.dev"
   ]
 }
 ```
 
-模型数量允许 **1–10 个**。`legacyOwnerId` 决定无法识别所有者的旧历史归属于哪个用户；通常填写第一个用户的稳定 `id`。
-
-### 3. 启动
+修改后：
 
 ```bash
-mkdir -p chat
-docker compose up -d --build
+sudo systemctl restart chat-backend
 ```
 
-访问：
+---
 
-```text
-http://服务器IP:3000
-```
+## 11. Cloudflare DNS 注意事项
 
-日志：
+如果 `api.example.com` 也托管在 Cloudflare DNS：
+
+第一次部署最省事的方式是先设为 `DNS only`（灰云），确认：
 
 ```bash
-docker compose logs -f
+curl https://api.example.com/api/health
 ```
 
-健康检查：
+证书和 API 都正常后，再决定是否打开 Cloudflare Proxy。
 
-```text
-http://服务器IP:3000/api/health
+如果打开代理，建议 Cloudflare SSL/TLS 使用 `Full (strict)`，因为源站 Caddy 已经拥有有效的 Let's Encrypt 证书。
+
+---
+
+## 12. 从旧版迁移数据
+
+先停止旧服务：
+
+```bash
+sudo systemctl stop chat-backend
 ```
 
-## 当前存储结构
+如果旧版是 Docker，请先停止旧容器，绝对不要让两个后端同时访问同一个 SQLite/chat 目录。
+
+备份：
+
+```bash
+sudo cp -a /opt/chat-backend/chat /opt/chat-backend/chat.backup
+```
+
+把旧版整个 `chat/` 数据复制到：
 
 ```text
+/opt/chat-backend/chat/
+```
+
+然后：
+
+```bash
+sudo chown -R chatapp:chatapp /opt/chat-backend/chat
+sudo systemctl start chat-backend
+```
+
+查看启动日志：
+
+```bash
+journalctl -u chat-backend -n 100 --no-pager
+```
+
+---
+
+## 13. 更新程序
+
+更新前：
+
+```bash
+sudo systemctl stop chat-backend
+sudo cp -a /opt/chat-backend/chat /opt/chat-backend/chat.backup
+sudo cp /opt/chat-backend/config.json /opt/chat-backend/config.json.backup
+```
+
+替换：
+
+```text
+server/
+package.json
+```
+
+保留：
+
+```text
+config.json
 chat/
-├── sqlite.db
-├── sqlite.db-wal                 # SQLite 运行时可能存在
-├── sqlite.db-shm                 # SQLite 运行时可能存在
-├── <conversation-id>.text.bin
-├── <conversation-id>.turn-1.attachments.bin
-├── <conversation-id>.turn-3.attachments.bin
-├── .uploads/                     # 未提交或尚未压缩的原始上传
-└── .work/                        # 临时聚合 ZIP，启动时会清空
 ```
 
-`.attachments.bin` 的内容是标准 ZIP。没有附件的轮次没有对应文件。
-
-SQLite 仅保存用户归属、轮次索引、模型、状态、分享状态和附件元数据；问题和回答正文保存在 `.text.bin`。
-
-## 附件处理流程
-
-1. 用户选择文件后，浏览器立即逐个上传。
-2. 所有文件完成前，提交按钮禁用。
-3. 点击提交后，服务器立即创建问题和 pending 回答并返回问题 URL。
-4. 后台执行等价于 `zip -9 -r` 的逐轮压缩。
-5. 逐轮 ZIP 原子写入 `chat/<id>.turn-N.attachments.bin`，此时本轮下载按钮启用。
-6. 原始上传目录立即删除。
-7. 后台临时复制已有逐轮 ZIP 为 `1.zip、3.zip……`，再生成外层 `att.zip`。
-8. 请求字节等价于：
-
-   ```bash
-   cat x.jpg att.zip > xa.jpg
-   ```
-
-9. provider 已读取完请求体后即可删除临时外层 ZIP，不需要等待首 token；失败、编辑取消任务或删除对话时也会删除。
-
-`maxRawUploadBytesPerTurn` 默认为 `0`（不额外限制原始文件总量）；最终逐轮 ZIP 和临时外层 ZIP 仍必须符合 70MB 限制。每次临时外层 ZIP 的实际大小不得超过 `70,000,000` 字节。载体 `a.jpg`/`x.jpg` 是 10×10 彩色 JPEG。
-
-## 追问和编辑
-
-- 每次追问可以选择新模型并上传新附件。
-- 没有新附件时不会生成空的 `N.zip`；此前有附件的轮次仍会发送给 provider。
-- 编辑任意一轮时可以修改文字和模型，附件保持只读。
-- 提交编辑会保留该轮原附件，删除该轮旧回答，并永久删除之后所有轮次的文字、回答、逐轮附件、上传暂存和后台任务。
-- Ctrl+Enter 或 Cmd+Enter 提交首次问题和追问；Enter、Shift+Enter、Ctrl/Cmd+Shift+Enter 不提交。
-
-## `<think>` 展示规则
-
-provider 可返回多组思考过程，例如：
-
-```text
-<think>abc</think>## 回答： abcde <think>abc</think>def <think>asd</think> 回答：
-```
-
-页面顺序为：
-
-```text
-查看思考过程
-abcde
-查看思考过程
-def
-查看思考过程
-```
-
-每个思考段独立展开或隐藏。复制回答的结果为：
-
-```text
-abcde
-def
-```
-
-每个非思考回答段的开头允许去除：
-
-- `Answer:` / `Answer：`
-- `回答:` / `回答：`
-- 前面带 1–6 个 Markdown `#` 的同类标题
-- 标题前的空白字符
-
-正文中间出现的这些文字不会删除。
-
-## 远程图片
-
-响应头的 CSP 包含：
-
-```text
-img-src 'self' data: blob: http: https:
-```
-
-因此 Markdown 或 HTML 回答中的远程图片不再被应用自身的 CSP 阻止。HTTPS 页面仍会受到浏览器“禁止 HTTP 混合内容”的规则；本应用直接以 HTTP 部署时不受该限制。
-
-## 登录和分享
-
-- 首页、历史、提问、编辑、私有附件下载都需要 token 登录。
-- token 验证后使用长期 HttpOnly Cookie；前端也保留 token 以便 Cookie 失效后自动恢复登录。
-- 不同用户 `id` 的历史和附件在后端隔离。
-- 分享 URL 使用后端生成的 43 字符随机串。
-- 分享访问者无需登录，可以查看问题、回答和下载每轮附件。
-- 关闭分享或删除对话后，公开页面、SSE 和附件下载立即失效。
-- 公开 API 不返回内部对话 UUID。
-
-## 错误显示
-
-provider 的 HTTP 错误、SSE 错误、普通 JSON 错误、网络错误和空响应会作为该轮回答显示。例如：
-
-```text
-provider HTTP 402：insufficient credit；type: payment_required；code: insufficient_credit
-```
-
-provider key、登录 token、Authorization 和常见敏感查询参数会在显示前脱敏。
-
-## 自动清理
-
-启动时和每 10 分钟执行：
-
-- 永久删除 7 天前的完整对话。
-- 当整个 `chat/` 超过 `3,000,000,000` 字节时，永久删除 24 小时前的完整对话。
-- 删除 24 小时未提交的上传暂存。
-
-删除按完整对话执行，包括 SQLite 索引、文字 bin、所有逐轮附件、原始上传、临时工作目录、分享 token、SSE 和后台任务。
-
-## HTTP 兼容
-
-应用不发送以下只适合可信安全来源的响应头：
-
-```text
-Cross-Origin-Opener-Policy
-Cross-Origin-Embedder-Policy
-Origin-Agent-Cluster
-Strict-Transport-Security
-```
-
-浏览器端不依赖 `crypto.randomUUID()`。普通 IP HTTP 地址可以登录、上传、提交、编辑、分享和复制。
-
-HTTP 不加密 token、问题和附件。公网使用时仍建议在反向代理处启用 HTTPS；必须使用 HTTP 时，应置于可信内网或 VPN。
-
-## 手机和小屏幕
-
-- 最小 320px 布局。
-- `100dvh` 和 iPhone 安全区。
-- 表单字号至少 16px，避免 iOS 自动放大。
-- 原生多文件选择器，选择后立即上传。
-- 上传进度、逐个移除、清空附件。
-- 主要触控按钮不小于约 44px。
-- 长文件名、长错误和分享链接不会撑宽页面。
-- Markdown 图片响应式缩放，代码块和表格独立横向滚动。
-- 深色模式与减少动画偏好。
-
-## 单实例要求
-
-只允许一个 Node 进程访问同一个 `chat/`：
-
-- 不要使用 PM2 cluster。
-- 不要使用 Node cluster。
-- 不要启动多个共享同一目录的容器。
-- 不要让多台机器共享同一个 SQLite 文件。
-
-## 验证
-
-联网环境：
+修正权限并启动：
 
 ```bash
-npm install
-npm run verify
+sudo chown -R root:chatapp /opt/chat-backend/server /opt/chat-backend/package.json
+sudo chown -R chatapp:chatapp /opt/chat-backend/chat
+sudo systemctl start chat-backend
 ```
 
-后端与核心流程测试不需要第三方后端依赖：
+检查：
 
 ```bash
-npm test
+systemctl status chat-backend
+curl http://127.0.0.1:3000/api/health
+curl https://api.example.com/api/health
 ```
 
-测试包含 HTTP 登录、立即上传、逐轮压缩与下载、无附件轮次不建 ZIP、临时外层 ZIP 的编号、分享下载、编辑截断、逐轮模型、provider 额度错误、远程图片响应、旧版附件迁移和多段 `<think>` 解析。
+---
 
-## provider 限制
+## 14. 常用命令
 
-`JPEG + ZIP` 依赖 provider 保留图片的原始上传字节。部分 provider 会重新编码 JPEG，只向模型提供像素，此时 JPEG EOI 后的 ZIP 会丢失。接近 70MB 的 ZIP 转为 Base64 后约 93.3MB，provider、反向代理、CDN 和 WAF 必须允许更大的 JSON 请求体。
+后端状态：
+
+```bash
+systemctl status chat-backend
+```
+
+后端日志：
+
+```bash
+journalctl -u chat-backend -f
+```
+
+重启后端：
+
+```bash
+sudo systemctl restart chat-backend
+```
+
+Caddy 状态：
+
+```bash
+systemctl status caddy
+```
+
+Caddy 日志：
+
+```bash
+journalctl -u caddy -f
+```
+
+检查 Caddy 配置：
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+平滑重新加载 Caddy：
+
+```bash
+sudo systemctl reload caddy
+```
+
+检查 Node：
+
+```bash
+node -v
+```
+
+检查本机 API：
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
+检查公网 HTTPS API：
+
+```bash
+curl https://api.example.com/api/health
+```
+
+---
+
+## 15. 后端不需要 npm install
+
+当前后端 `package.json` 没有第三方运行时依赖，服务端代码使用 Node.js 内置模块。因此直接部署后端时不需要 `npm install`。
+
+但系统必须提供：
+
+```text
+Node.js >= 22.5.0
+zip
+unzip
+```
+
+前端仍然需要 npm，因为 Cloudflare Pages 要执行 Vue/Vite 构建。

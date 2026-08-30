@@ -11,6 +11,10 @@ export function loadConfig(rootDir) {
   config.provider ||= {};
   config.provider.headers ||= {};
   config.provider.extraBody ||= {};
+  config.cors = {
+    allowedOrigins: ['http://localhost:5173'],
+    ...(config.cors || {})
+  };
   config.limits = {
     maxConcurrentTasks: 10,
     maxCompressedAttachmentBytes: 70_000_000,
@@ -52,6 +56,10 @@ function validate(config) {
     userIds.add(user.id); tokens.add(user.token);
   }
   if (config.auth.legacyOwnerId && !userIds.has(config.auth.legacyOwnerId)) throw new Error('auth.legacyOwnerId 必须对应 auth.users 中的用户 id');
+  if (!Array.isArray(config.cors.allowedOrigins) || config.cors.allowedOrigins.length < 1) throw new Error('cors.allowedOrigins 至少需要配置一个前端 Origin');
+  for (const origin of config.cors.allowedOrigins) {
+    if (typeof origin !== 'string' || !/^https?:\/\//i.test(origin) || origin.endsWith('/')) throw new Error(`cors.allowedOrigins 无效：${origin}`);
+  }
   if (config.limits.maxConcurrentTasks < 1 || config.limits.maxConcurrentTasks > 10) throw new Error('maxConcurrentTasks 必须为 1 到 10');
   if (config.limits.maxCompressedAttachmentBytes > 70_000_000) throw new Error('压缩附件上限不能超过 70,000,000 字节');
 }

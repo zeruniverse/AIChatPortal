@@ -13,6 +13,7 @@ button, input, textarea, select { font: inherit; }
 button, .button { min-height: 44px; }
 input, textarea, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; padding: 11px 12px; background: #fff; color: #111827; font-size: 16px; }
 textarea { resize: vertical; line-height: 1.55; }
+textarea.file-drop-active { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.16); background: #eff6ff; }
 label { display: grid; gap: 7px; font-weight: 650; }
 .app-shell { min-height: 100dvh; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: calc(10px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); background: rgba(17,24,39,.96); color: #fff; backdrop-filter: blur(14px); }
@@ -109,6 +110,7 @@ h2 { font-size: 1.1rem; }
   .card, .turn-card, .assistant-message { background: #0f172a; border-color: #334155; }
   .user-message, .upload-item { background: #111827; border-color: #334155; }
   input, textarea, select { background: #020617; color: #e2e8f0; border-color: #475569; }
+  textarea.file-drop-active { border-color: #60a5fa; background: #0f172a; box-shadow: 0 0 0 3px rgba(96,165,250,.2); }
   .muted, .hint { color: #94a3b8; }
   .think-text { background: #111827; border-color: #334155; }
   .button.ghost { border-color: #475569; }

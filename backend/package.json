@@ -1,0 +1,13 @@
+{
+  "name": "chat-backend",
+  "version": "7.0.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/app.js",
+    "check": "node --check server/app.js && node --check server/auth.js && node --check server/config.js && node --check server/worker.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

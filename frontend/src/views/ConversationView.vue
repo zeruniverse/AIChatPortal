@@ -1,7 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { api } from '../api.js';
+import { api, openEventStream } from '../api.js';
+import { apiUrl } from '../runtimeConfig.js';
 import { loadPublicConfig, publicConfig } from '../configStore.js';
 import { shouldSubmit } from '../utils/shortcut.js';
 import { visibleAnswer } from '../utils/answerParser.js';
@@ -9,7 +10,7 @@ import AnswerContent from '../components/AnswerContent.vue';
 import AttachmentUploader from '../components/AttachmentUploader.vue';
 import CopyButton from '../components/CopyButton.vue';
 
-const route = useRoute(); const router = useRouter(); const data = ref(null); const error = ref(''); const loading = ref(true); const followQuestion = ref(''); const followModel = ref(''); const followBusy = ref(false); const uploadState = ref({ uploadId: null, busy: false, failed: false, hasFiles: false, ready: true }); const uploader = ref(null);
+const route = useRoute(); const router = useRouter(); const data = ref(null); const error = ref(''); const loading = ref(true); const followQuestion = ref(''); const followModel = ref(''); const followBusy = ref(false); const followDrag = ref(false); const uploadState = ref({ uploadId: null, busy: false, failed: false, hasFiles: false, ready: true }); const uploader = ref(null);
 const edit = ref(null); const shareBusy = ref(false); let events; let poll;
 const lastTurn = computed(() => { const turns = data.value?.turns || []; return turns[turns.length - 1]; });
 const canFollow = computed(() => ['completed','error'].includes(lastTurn.value?.status) && followQuestion.value.trim() && followModel.value && uploadState.value.ready && !followBusy.value);
@@ -23,9 +24,10 @@ async function load(silent = false) {
 }
 function connect() {
   events?.close();
-  events = new EventSource(`/api/conversations/${route.params.id}/events`);
-  events.addEventListener('update', () => load(true));
-  events.onerror = () => { events?.close(); clearInterval(poll); poll = setInterval(() => load(true), 4000); };
+  events = openEventStream(`/api/conversations/${route.params.id}/events`, {
+    update: () => load(true),
+    error: () => { events?.close(); clearInterval(poll); poll = setInterval(() => load(true), 4000); }
+  });
 }
 async function submitFollow() {
   if (!canFollow.value) return;
@@ -37,6 +39,26 @@ async function submitFollow() {
   finally { followBusy.value = false; }
 }
 function followKey(event) { if (shouldSubmit(event)) { event.preventDefault(); submitFollow(); } }
+function hasDraggedFiles(event) { return Array.from(event.dataTransfer?.types || []).includes('Files'); }
+function dragFollow(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  if (followBusy.value || !['completed','error'].includes(lastTurn.value?.status)) { followDrag.value = false; return; }
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  followDrag.value = true;
+}
+function leaveFollow(event) { if (hasDraggedFiles(event)) followDrag.value = false; }
+function dropFollowFiles(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  followDrag.value = false;
+  if (followBusy.value || !['completed','error'].includes(lastTurn.value?.status)) return;
+  const files = event.dataTransfer?.files;
+  if (files?.length) {
+    const pending = uploader.value?.addFiles(files);
+    pending?.catch((e) => { error.value = e.message; });
+  }
+}
 function startEdit(turn) { edit.value = { turnNo: turn.turnNo, question: String(turn.question), modelId: String(turn.modelId), busy: false, error: '' }; }
 async function submitEdit() {
   if (!edit.value?.question.trim() || edit.value.busy) return;
@@ -53,6 +75,17 @@ async function removeConversation() { if (!confirm('确定删除这整个对话�
 function modelLabel(id) { return publicConfig.models.find((model) => model.id === id)?.label || id; }
 function statusText(status) { return ({ pending:'等待处理',compressing:'正在处理附件',generating:'正在回答',completed:'已完成',error:'失败' })[status] || status; }
 function formatSize(size) { return size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`; }
+async function downloadTurnAttachments(turn) {
+  try {
+    const result = await api(`/api/conversations/${data.value.id}/turns/${turn.turnNo}/attachments-link`);
+    const link = document.createElement('a');
+    link.href = apiUrl(result.url);
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } catch (e) { error.value = e.message; }
+}
 onMounted(async () => { await loadPublicConfig(); await load(); connect(); });
 onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
 </script>
@@ -84,7 +117,7 @@ onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
             <p v-else class="message-text">{{ turn.question }}</p>
             <div v-if="turn.hasAttachments" class="attachment-row">
               <span>本轮附件：{{ turn.attachmentReady ? `${formatSize(turn.attachmentSize)}` : '正在处理，暂不可下载' }}</span>
-              <a v-if="turn.attachmentReady" class="button secondary compact" :href="`/api/conversations/${data.id}/turns/${turn.turnNo}/attachments`">下载附件</a>
+              <button v-if="turn.attachmentReady" type="button" class="button secondary compact" @click="downloadTurnAttachments(turn)">下载附件</button>
             </div>
           </section>
           <section class="message assistant-message">
@@ -98,7 +131,7 @@ onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
         <h2>继续追问</h2>
         <p v-if="!['completed','error'].includes(lastTurn?.status)" class="hint">上一轮完成后才能追问。</p>
         <label>本轮模型<select v-model="followModel" :disabled="!['completed','error'].includes(lastTurn?.status)"><option v-for="model in publicConfig.models" :key="model.id" :value="model.id">{{ model.label }}</option></select></label>
-        <label>追问<textarea v-model="followQuestion" rows="6" :disabled="!['completed','error'].includes(lastTurn?.status)" @keydown="followKey"></textarea></label>
+        <label>追问<textarea v-model="followQuestion" rows="6" :disabled="!['completed','error'].includes(lastTurn?.status)" :class="{ 'file-drop-active': followDrag }" @keydown="followKey" @dragenter="dragFollow" @dragover="dragFollow" @dragleave="leaveFollow" @drop="dropFollowFiles"></textarea></label>
         <AttachmentUploader ref="uploader" :disabled="followBusy || !['completed','error'].includes(lastTurn?.status)" @state="uploadState = $event" />
         <button class="button primary full" :disabled="!canFollow">{{ followBusy ? '提交中…' : uploadState.busy ? '请等待附件上传完成' : '提交追问' }}</button>
       </form>
