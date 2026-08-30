@@ -41,7 +41,7 @@ for (const model of config.models) {
 }
 
 const packageJson = JSON.parse(read('package.json'));
-if (packageJson.version !== '5.3.1') throw new Error('项目版本必须为 5.3.1');
+if (packageJson.version !== '5.3.2') throw new Error('项目版本必须为 5.3.2');
 for (const [name, version] of Object.entries({ ...packageJson.dependencies, ...packageJson.devDependencies })) {
   if (/^[~^*]|\bx\b/i.test(version)) throw new Error(`依赖 ${name} 没有固定版本：${version}`);
 }

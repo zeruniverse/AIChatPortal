@@ -72,3 +72,21 @@ test('有 think 时只删除最后一个 </think> 后（可先有空白）的 An
   const chineseContainsPrefix = parseModelResponse('<think>分析</think>\n\n最终答案第一行\n回答：这是正文的一部分');
   assert.equal(chineseContainsPrefix.answer, '最终答案第一行\n回答：这是正文的一部分');
 });
+
+
+test('开头或 think 后允许 Markdown 标题形式的 Answer/回答 前缀', () => {
+  assert.equal(stripAnswerPrefix('# 回答：\n正文'), '正文');
+  assert.equal(stripAnswerPrefix('## 回答:\n正文'), '正文');
+  assert.equal(stripAnswerPrefix('# Answer：\ncontent'), 'content');
+  assert.equal(stripAnswerPrefix('## Answer:\ncontent'), 'content');
+  assert.equal(stripAnswerPrefix('   ###   回答：   正文   '), '正文');
+  assert.equal(parseModelResponse('<think>分析</think>\n\n## 回答：\n最终答案').answer, '最终答案');
+  assert.equal(parseModelResponse('<think>分析</think>\n  # Answer：\nfinal').answer, 'final');
+});
+
+test('Markdown Answer/回答 标题只在最终回答开头删除，正文中必须保留', () => {
+  assert.equal(stripAnswerPrefix('正文第一行\n# 回答：\n这是正文'), '正文第一行\n# 回答：\n这是正文');
+  assert.equal(stripAnswerPrefix('正文第一行\n## Answer:\nthis is body'), '正文第一行\n## Answer:\nthis is body');
+  assert.equal(parseModelResponse('<think>分析</think>\n正文第一行\n# 回答：\n这是正文').answer, '正文第一行\n# 回答：\n这是正文');
+  assert.equal(stripAnswerPrefix('# 普通标题\n回答正文'), '# 普通标题\n回答正文');
+});

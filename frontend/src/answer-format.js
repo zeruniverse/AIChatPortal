@@ -4,7 +4,7 @@ const OPEN_THINK = /<think\b[^>]*>/i;
 export function stripAnswerPrefix(value) {
   const trimmed = String(value ?? '').trimStart().trimEnd();
   return trimmed
-    .replace(/^(?:answer|回答)\s*[:：][ \t]*(?:\r?\n)?/i, '')
+    .replace(/^(?:#{1,6}[ \t]*)?(?:answer|回答)\s*[:：][ \t]*(?:\r?\n)?/i, '')
     .trimStart()
     .trimEnd();
 }
