@@ -12,16 +12,70 @@ function zipEntries(filePath) {
   return result.stdout.split(/\r?\n/).filter(Boolean);
 }
 
+function tarXzEntries(filePath) {
+  const result = spawnSync('tar', ['-tJf', filePath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  if (result.status !== 0) return null;
+  return result.stdout.split(/\r?\n/).filter(Boolean);
+}
+
+function hasFiles(entries) {
+  return Boolean(entries?.some((name) => !name.endsWith('/')));
+}
+
+async function runProcess(command, args, { cwd } = {}) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`${command} 失败：${stderr.trim()}`)));
+  });
+}
+
 async function extractEntry(zipPath, entry, target) {
   await new Promise((resolve, reject) => {
     const child = spawn('unzip', ['-p', zipPath, entry], { stdio: ['ignore', 'pipe', 'pipe'] });
     const out = fs.createWriteStream(target, { mode: 0o600 });
     let stderr = '';
+    let processDone = false;
+    let outputDone = false;
+    const finish = () => { if (processDone && outputDone) resolve(); };
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.stdout.pipe(out);
     child.on('error', reject);
-    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`无法解压旧附件 ${entry}：${stderr}`)));
+    out.on('error', reject);
+    out.on('finish', () => { outputDone = true; finish(); });
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`无法解压旧附件 ${entry}：${stderr}`));
+      processDone = true;
+      finish();
+    });
   });
+}
+
+async function convertZipToTarXz(filePath) {
+  const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const tempDir = `${filePath}.${suffix}.dir`;
+  const tempArchive = `${filePath}.${suffix}.tar.xz`;
+  await fs.promises.rm(tempDir, { recursive: true, force: true });
+  await fs.promises.mkdir(tempDir, { recursive: true });
+  try {
+    await runProcess('unzip', ['-q', filePath, '-d', tempDir]);
+    await runProcess('tar', ['-I', 'xz -8', '-cf', tempArchive, '.'], { cwd: tempDir });
+    await fs.promises.rename(tempArchive, filePath);
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+    await fs.promises.rm(tempArchive, { force: true });
+  }
+}
+
+async function ensureTarXzArchive(filePath) {
+  let entries = tarXzEntries(filePath);
+  if (entries) return entries;
+  if (!zipEntries(filePath)) return null;
+  await convertZipToTarXz(filePath);
+  entries = tarXzEntries(filePath);
+  return entries;
 }
 
 function normalizeTurn(turn, fallbackNo) {
@@ -105,8 +159,8 @@ async function migrateAttachments(db, storage, conversation) {
           const turnNo = Number(item.match[1]);
           const target = storage.attachmentPath(conversation.id, turnNo);
           await extractEntry(legacy, item.entry, target);
-          const innerEntries = zipEntries(target);
-          if (!innerEntries || !innerEntries.some((name) => !name.endsWith('/'))) {
+          const innerEntries = await ensureTarXzArchive(target);
+          if (!hasFiles(innerEntries)) {
             await fs.promises.rm(target, { force: true });
             db.raw.prepare('UPDATE turns SET has_attachments=0,attachment_ready=0,attachment_size=0 WHERE conversation_id=? AND turn_no=?').run(conversation.id, turnNo);
           } else {
@@ -114,11 +168,17 @@ async function migrateAttachments(db, storage, conversation) {
             db.raw.prepare('UPDATE turns SET has_attachments=1,attachment_ready=1,attachment_size=? WHERE conversation_id=? AND turn_no=?').run(size, conversation.id, turnNo);
           }
         }
-      } else if (entries.some((name) => !name.endsWith('/'))) {
+      } else if (hasFiles(entries)) {
         const target = storage.attachmentPath(conversation.id, 1);
         await fs.promises.copyFile(legacy, target);
-        const size = (await fs.promises.stat(target)).size;
-        db.raw.prepare('UPDATE turns SET has_attachments=1,attachment_ready=1,attachment_size=? WHERE conversation_id=? AND turn_no=1').run(size, conversation.id);
+        const innerEntries = await ensureTarXzArchive(target);
+        if (hasFiles(innerEntries)) {
+          const size = (await fs.promises.stat(target)).size;
+          db.raw.prepare('UPDATE turns SET has_attachments=1,attachment_ready=1,attachment_size=? WHERE conversation_id=? AND turn_no=1').run(size, conversation.id);
+        } else {
+          await fs.promises.rm(target, { force: true });
+          db.raw.prepare('UPDATE turns SET has_attachments=0,attachment_ready=0,attachment_size=0 WHERE conversation_id=? AND turn_no=1').run(conversation.id);
+        }
       }
     }
     await fs.promises.rm(legacy, { force: true });
@@ -129,8 +189,8 @@ async function migrateAttachments(db, storage, conversation) {
       if (turn.attachment_ready) db.raw.prepare('UPDATE turns SET has_attachments=0,attachment_ready=0,attachment_size=0 WHERE conversation_id=? AND turn_no=?').run(conversation.id, turn.turn_no);
       continue;
     }
-    const entries = zipEntries(target);
-    if (!entries || !entries.some((name) => !name.endsWith('/'))) {
+    const entries = await ensureTarXzArchive(target);
+    if (!hasFiles(entries)) {
       await fs.promises.rm(target, { force: true });
       db.raw.prepare('UPDATE turns SET has_attachments=0,attachment_ready=0,attachment_size=0 WHERE conversation_id=? AND turn_no=?').run(conversation.id, turn.turn_no);
     } else {

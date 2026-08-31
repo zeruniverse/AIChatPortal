@@ -105,6 +105,15 @@ function uniqueStoredNameFromList(existingNames, originalName) {
   return `${base} (${n})${ext}`;
 }
 
+function validateRawUploadSize(totalSize) {
+  const limit = config.limits.maxRawUploadBytesPerTurn;
+  if (totalSize >= limit) {
+    const error = new Error(`本轮附件原始总大小必须小于 ${limit.toLocaleString('en-US')} 字节`);
+    error.statusCode = 413;
+    throw error;
+  }
+}
+
 function validateUploadForSubmit(uploadId, ownerId) {
   if (!uploadId) return { hasAttachments: 0, upload: null };
   const upload = db.getOwnedUpload(uploadId, ownerId);
@@ -116,6 +125,7 @@ function validateUploadForSubmit(uploadId, ownerId) {
   if (files.some((file) => file.status !== 'complete' || file.received_size !== file.size)) {
     const error = new Error('必须等待所有附件上传完成后再提交'); error.statusCode = 409; throw error;
   }
+  validateRawUploadSize(upload.total_raw_size);
   return { hasAttachments: 1, upload };
 }
 
@@ -124,6 +134,7 @@ function bindUploadInTransaction(uploadId, ownerId, conversationId, turnNo) {
   if (!upload || upload.status !== 'open') { const error = new Error('附件上传会话已被使用或删除'); error.statusCode = 409; throw error; }
   const files = db.listUploadFiles(uploadId);
   if (!files.length || files.some((file) => file.status !== 'complete' || file.received_size !== file.size)) { const error = new Error('附件上传状态已变化，请重新选择附件'); error.statusCode = 409; throw error; }
+  validateRawUploadSize(upload.total_raw_size);
   const result = db.raw.prepare("UPDATE uploads SET status='bound',conversation_id=?,turn_no=?,updated_at=? WHERE id=? AND owner_id=? AND status='open'").run(conversationId, turnNo, now(), uploadId, ownerId);
   if (result.changes !== 1) { const error = new Error('附件上传会话已被使用'); error.statusCode = 409; throw error; }
 }
@@ -193,7 +204,7 @@ async function streamDownload(res, filePath, filename) {
   try { stat = await fs.promises.stat(filePath); }
   catch { return json(res, 404, { error: '附件包不存在' }); }
   res.writeHead(200, {
-    'Content-Type': 'application/zip',
+    'Content-Type': 'application/x-xz',
     'Content-Length': stat.size,
     'Content-Disposition': contentDisposition(filename),
     'Cache-Control': 'private, no-store'
@@ -246,7 +257,7 @@ async function handleApi(req, res, url) {
       if (!freshUpload || freshUpload.status !== 'open') { const error = new Error('上传会话不存在或已提交'); error.statusCode = 404; throw error; }
       const files = db.listUploadFiles(upload.id);
       if (files.length >= config.limits.maxFilesPerTurn) { const error = new Error(`每轮最多 ${config.limits.maxFilesPerTurn} 个文件`); error.statusCode = 413; throw error; }
-      if (config.limits.maxRawUploadBytesPerTurn > 0 && freshUpload.total_raw_size + size > config.limits.maxRawUploadBytesPerTurn) { const error = new Error('本轮附件原始总大小超过服务器限制'); error.statusCode = 413; throw error; }
+      validateRawUploadSize(freshUpload.total_raw_size + size);
       const name = uniqueStoredNameFromList(files.map((item) => item.stored_name), body.name);
       db.raw.prepare('INSERT INTO upload_files(id,upload_id,original_name,stored_name,size,mime,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(fileId, upload.id, String(body.name), name, size, String(body.type || ''), 'pending', stamp, stamp);
       db.raw.prepare('UPDATE uploads SET total_raw_size=total_raw_size+?, updated_at=? WHERE id=?').run(size, stamp, upload.id);
@@ -387,7 +398,8 @@ async function handleApi(req, res, url) {
       const removedTurns = db.listTurns(conversation.id).filter((turn) => turn.turn_no > turnNo);
       const oldText = await storage.readText(conversation.id);
       const newText = JSON.parse(JSON.stringify(oldText));
-      newText.turns = newText.turns.filter((turn) => turn.turnNo <= turnNo).map((turn) => turn.turnNo === turnNo ? { ...turn, question, answer: '', updatedAt: now() } : turn);
+      const stamp = now();
+      newText.turns = newText.turns.filter((turn) => turn.turnNo <= turnNo).map((turn) => turn.turnNo === turnNo ? { ...turn, question, answer: '', createdAt: stamp, updatedAt: stamp } : turn);
       await storage.writeText(conversation.id, newText);
       try {
         db.transaction(() => {
@@ -395,8 +407,8 @@ async function handleApi(req, res, url) {
           const activeRemoved = db.raw.prepare("SELECT COUNT(*) AS count FROM turns WHERE conversation_id=? AND turn_no>=? AND status IN ('pending','compressing','generating')").get(conversation.id, turnNo).count;
           if (activeTotal - activeRemoved >= config.limits.maxConcurrentTasks) { const error = new Error('系统任务已满，暂时无法重新提交编辑'); error.statusCode = 429; throw error; }
           db.raw.prepare('DELETE FROM turns WHERE conversation_id=? AND turn_no>?').run(conversation.id, turnNo);
-          db.raw.prepare("UPDATE turns SET model_id=?,status='pending',attempt=attempt+1,updated_at=? WHERE conversation_id=? AND turn_no=?").run(body.modelId, now(), conversation.id, turnNo);
-          db.raw.prepare('UPDATE conversations SET title=CASE WHEN ?=1 THEN ? ELSE title END,updated_at=? WHERE id=?').run(turnNo, titleFromQuestion(question), now(), conversation.id);
+          db.raw.prepare("UPDATE turns SET model_id=?,status='pending',attempt=attempt+1,created_at=?,updated_at=? WHERE conversation_id=? AND turn_no=?").run(body.modelId, stamp, stamp, conversation.id, turnNo);
+          db.raw.prepare('UPDATE conversations SET title=CASE WHEN ?=1 THEN ? ELSE title END,updated_at=? WHERE id=?').run(turnNo, titleFromQuestion(question), stamp, conversation.id);
         });
       } catch (error) { await storage.writeText(conversation.id, oldText); throw error; }
       for (const turn of removedTurns) {
@@ -445,7 +457,7 @@ async function handleApi(req, res, url) {
     const turn = db.getTurn(conversation.id, turnNo);
     if (!turn?.has_attachments) return json(res, 404, { error: '本轮没有附件' });
     if (!turn.attachment_ready) return json(res, 409, { error: '本轮附件仍在处理，暂不可下载' });
-    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), `conversation-${conversation.id}-turn-${turnNo}-attachments.zip`);
+    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), 'att.tar.xz');
   }
   if (req.method === 'DELETE' && pathname === '/api/conversations') {
     const user = userOr401(req, res); if (!user) return;
@@ -470,7 +482,7 @@ async function handleApi(req, res, url) {
     if (!timingSafeEqualText(expected, signature)) return json(res, 404, { error: '下载链接已失效' });
     const turn = db.getTurn(conversation.id, turnNo);
     if (!turn?.has_attachments || !turn.attachment_ready) return json(res, 404, { error: '附件不存在' });
-    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), `conversation-${conversation.id}-turn-${turnNo}-attachments.zip`);
+    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), 'att.tar.xz');
   }
 
   if (req.method === 'GET' && (match = pathname.match(/^\/api\/public\/shares\/([^/]+)$/))) {
@@ -490,7 +502,7 @@ async function handleApi(req, res, url) {
     const turn = db.getTurn(conversation.id, turnNo);
     if (!turn?.has_attachments) return json(res, 404, { error: '本轮没有附件' });
     if (!turn.attachment_ready) return json(res, 409, { error: '本轮附件仍在压缩，暂不可下载' });
-    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), `shared-turn-${turnNo}-attachments.zip`);
+    return streamDownload(res, storage.attachmentPath(conversation.id, turnNo), 'att.tar.xz');
   }
   return json(res, 404, { error: '接口不存在' });
 }

@@ -37,8 +37,8 @@
   ],
   "limits": {
     "maxConcurrentTasks": 10,
-    "maxCompressedAttachmentBytes": 70000000,
-    "maxRawUploadBytesPerTurn": 0,
+    "maxCompressedAttachmentBytes": 78000000,
+    "maxRawUploadBytesPerTurn": 1000000000,
     "maxFilesPerTurn": 100
   },
   "cleanup": {

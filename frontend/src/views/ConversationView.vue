@@ -48,6 +48,16 @@ function dragFollow(event) {
   followDrag.value = true;
 }
 function leaveFollow(event) { if (hasDraggedFiles(event)) followDrag.value = false; }
+function pasteFollowImages(event) {
+  if (followBusy.value || !['completed','error'].includes(lastTurn.value?.status)) return;
+  const items = Array.from(event.clipboardData?.items || []);
+  const itemFiles = items.filter((item) => item.kind === 'file' && item.type.startsWith('image/')).map((item) => item.getAsFile()).filter(Boolean);
+  const files = itemFiles.length ? itemFiles : Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'));
+  if (!files.length) return;
+  event.preventDefault();
+  const pending = uploader.value?.addFiles(files);
+  pending?.catch((e) => { error.value = e.message; });
+}
 function dropFollowFiles(event) {
   if (!hasDraggedFiles(event)) return;
   event.preventDefault();
@@ -73,7 +83,12 @@ async function toggleShare() {
 }
 async function removeConversation() { if (!confirm('确定删除这整个对话及所有附件吗？')) return; await api(`/api/conversations/${route.params.id}`, { method: 'DELETE' }); router.replace('/'); }
 function modelLabel(id) { return publicConfig.models.find((model) => model.id === id)?.label || id; }
-function statusText(status) { return ({ pending:'等待处理',compressing:'正在处理附件',generating:'正在回答',completed:'已完成',error:'失败' })[status] || status; }
+function statusText(turn) {
+  const text = ({ pending:'等待处理',compressing:'正在处理附件',generating:'正在回答',completed:'已完成',error:'失败' })[turn.status] || turn.status;
+  if (turn.status !== 'completed') return text;
+  const elapsed = Number(turn.updatedAt) - Number(turn.createdAt);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? `${text} 耗时${(elapsed / 60_000).toFixed(1)}m` : text;
+}
 function formatSize(size) { return size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`; }
 async function downloadTurnAttachments(turn) {
   try {
@@ -121,8 +136,8 @@ onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
             </div>
           </section>
           <section class="message assistant-message">
-            <div class="message-head"><strong>第 {{ turn.turnNo }} 次回答</strong><div class="message-actions"><span class="status-chip">{{ statusText(turn.status) }}</span><CopyButton :text="visibleAnswer(turn.answer)" label="复制回答" :disabled="!visibleAnswer(turn.answer)" /></div></div>
-            <div v-if="['pending','compressing','generating'].includes(turn.status) && !turn.answer" class="pending"><span class="spinner"></span>{{ statusText(turn.status) }}</div>
+            <div class="message-head"><strong>第 {{ turn.turnNo }} 次回答</strong><div class="message-actions"><span class="status-chip">{{ statusText(turn) }}</span><CopyButton :text="visibleAnswer(turn.answer)" label="复制回答" :disabled="!visibleAnswer(turn.answer)" /></div></div>
+            <div v-if="['pending','compressing','generating'].includes(turn.status) && !turn.answer" class="pending"><span class="spinner"></span>{{ statusText(turn) }}</div>
             <AnswerContent v-if="turn.answer" :raw="turn.answer" />
           </section>
         </article>
@@ -131,7 +146,7 @@ onBeforeUnmount(() => { events?.close(); clearInterval(poll); });
         <h2>继续追问</h2>
         <p v-if="!['completed','error'].includes(lastTurn?.status)" class="hint">上一轮完成后才能追问。</p>
         <label>本轮模型<select v-model="followModel" :disabled="!['completed','error'].includes(lastTurn?.status)"><option v-for="model in publicConfig.models" :key="model.id" :value="model.id">{{ model.label }}</option></select></label>
-        <label>追问<textarea v-model="followQuestion" rows="6" :disabled="!['completed','error'].includes(lastTurn?.status)" :class="{ 'file-drop-active': followDrag }" @keydown="followKey" @dragenter="dragFollow" @dragover="dragFollow" @dragleave="leaveFollow" @drop="dropFollowFiles"></textarea></label>
+        <label>追问<textarea v-model="followQuestion" rows="6" :disabled="!['completed','error'].includes(lastTurn?.status)" :class="{ 'file-drop-active': followDrag }" @keydown="followKey" @paste="pasteFollowImages" @dragenter="dragFollow" @dragover="dragFollow" @dragleave="leaveFollow" @drop="dropFollowFiles"></textarea></label>
         <AttachmentUploader ref="uploader" :disabled="followBusy || !['completed','error'].includes(lastTurn?.status)" @state="uploadState = $event" />
         <button class="button primary full" :disabled="!canFollow">{{ followBusy ? '提交中…' : uploadState.busy ? '请等待附件上传完成' : '提交追问' }}</button>
       </form>

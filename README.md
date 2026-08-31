@@ -46,7 +46,7 @@ Node 的 3000 端口不需要对公网开放。
 
 ```bash
 sudo apt update
-sudo apt install -y curl ca-certificates zip unzip xz-utils
+sudo apt install -y curl ca-certificates tar xz-utils zip unzip
 ```
 
 ### 安装 Node.js
@@ -189,8 +189,8 @@ sudo nano /opt/chat-backend/config.json
   ],
   "limits": {
     "maxConcurrentTasks": 10,
-    "maxCompressedAttachmentBytes": 70000000,
-    "maxRawUploadBytesPerTurn": 0,
+    "maxCompressedAttachmentBytes": 78000000,
+    "maxRawUploadBytesPerTurn": 1000000000,
     "maxFilesPerTurn": 100
   },
   "cleanup": {
@@ -643,6 +643,8 @@ curl https://api.example.com/api/health
 
 ```text
 Node.js >= 22.5.0
+tar
+xz
 zip
 unzip
 ```

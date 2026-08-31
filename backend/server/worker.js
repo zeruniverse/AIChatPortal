@@ -51,6 +51,7 @@ export function createWorker({ config, db, storage, emitUpdate }) {
     try {
       const stat = await fs.promises.stat(finalPath);
       if (stat.size > 0) {
+        if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`本轮附件压缩后为 ${stat.size.toLocaleString('en-US')} 字节，超过 ${config.limits.maxCompressedAttachmentBytes.toLocaleString('en-US')} 字节限制`);
         db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'compressing', now(), { attachment_ready: 1, attachment_size: stat.size });
         if (turn.upload_id) await cleanupUpload(turn.upload_id, turn.conversation_id, turn.turn_no);
         return finalPath;
@@ -65,11 +66,11 @@ export function createWorker({ config, db, storage, emitUpdate }) {
     const work = storage.workPath(turn.conversation_id, turn.turn_no, turn.attempt);
     await removePath(work);
     await ensureDir(work);
-    const tempZip = path.join(work, 'turn.zip');
-    await runCommand('zip', ['-9', '-q', '-r', tempZip, '.'], { cwd: sourceDir, signal });
-    const stat = await fs.promises.stat(tempZip);
-    if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`本轮附件压缩后为 ${stat.size} 字节，超过 70,000,000 字节限制`);
-    await fs.promises.rename(tempZip, finalPath);
+    const tempArchive = path.join(work, 'turn.tar.xz');
+    await runCommand('tar', ['-I', 'xz -8', '-cf', tempArchive, '.'], { cwd: sourceDir, signal });
+    const stat = await fs.promises.stat(tempArchive);
+    if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`本轮附件压缩后为 ${stat.size.toLocaleString('en-US')} 字节，超过 ${config.limits.maxCompressedAttachmentBytes.toLocaleString('en-US')} 字节限制`);
+    await fs.promises.rename(tempArchive, finalPath);
     db.updateTurnStatus(turn.conversation_id, turn.turn_no, 'compressing', now(), { attachment_ready: 1, attachment_size: stat.size, upload_id: null });
     await cleanupUpload(turn.upload_id, turn.conversation_id, turn.turn_no);
     await removePath(work);
@@ -94,16 +95,16 @@ export function createWorker({ config, db, storage, emitUpdate }) {
     const names = [];
     for (const item of turns) {
       const source = storage.attachmentPath(item.conversation_id, item.turn_no);
-      const name = `${item.turn_no}.zip`;
+      const name = `${item.turn_no}.tar.xz`;
       const dest = path.join(stage, name);
       try { await fs.promises.link(source, dest); }
       catch { await fs.promises.copyFile(source, dest); }
       names.push(name);
     }
-    const aggregate = path.join(work, 'att.zip');
-    await runCommand('zip', ['-9', '-q', aggregate, ...names], { cwd: stage, signal });
+    const aggregate = path.join(work, 'att.tar.xz');
+    await runCommand('tar', ['-I', 'xz -8', '-cf', aggregate, ...names], { cwd: stage, signal });
     const stat = await fs.promises.stat(aggregate);
-    if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`全部轮次附件压缩后为 ${stat.size} 字节，超过 70,000,000 字节限制`);
+    if (stat.size > config.limits.maxCompressedAttachmentBytes) throw new Error(`多轮对话 context 附件压缩包为 ${stat.size.toLocaleString('en-US')} 字节，超过 ${config.limits.maxCompressedAttachmentBytes.toLocaleString('en-US')} 字节限制`);
     return { aggregate, work };
   }
 

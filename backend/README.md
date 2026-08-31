@@ -7,7 +7,7 @@
 - Caddy 监听公网 80/443
 - Caddy 向 `127.0.0.1:3000` 反向代理 API
 - Caddy 通过 Let's Encrypt 自动申请和续期 HTTPS 证书
-- 系统安装 `zip`、`unzip`
+- 系统安装 `tar`、`xz`；迁移旧附件时还需要 `zip`、`unzip`
 
 完整步骤见项目根目录 `README.md`。
 

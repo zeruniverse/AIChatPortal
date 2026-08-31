@@ -27,6 +27,16 @@ function dragQuestion(event) {
   questionDrag.value = true;
 }
 function leaveQuestion(event) { if (hasDraggedFiles(event)) questionDrag.value = false; }
+function pasteQuestionImages(event) {
+  if (busy.value) return;
+  const items = Array.from(event.clipboardData?.items || []);
+  const itemFiles = items.filter((item) => item.kind === 'file' && item.type.startsWith('image/')).map((item) => item.getAsFile()).filter(Boolean);
+  const files = itemFiles.length ? itemFiles : Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'));
+  if (!files.length) return;
+  event.preventDefault();
+  const pending = uploader.value?.addFiles(files);
+  pending?.catch((e) => { error.value = e.message; });
+}
 function dropQuestionFiles(event) {
   if (!hasDraggedFiles(event)) return;
   event.preventDefault();
@@ -44,7 +54,7 @@ function dropQuestionFiles(event) {
     <header class="page-header"><div><h1>新建提问</h1><p class="muted">Ctrl+Enter 或 Cmd+Enter 提交；Enter 与 Shift+Enter 只换行。</p></div></header>
     <form class="card composer" @submit.prevent="submit">
       <label>模型<select v-model="modelId"><option v-for="model in publicConfig.models" :key="model.id" :value="model.id">{{ model.label }}</option></select></label>
-      <label>问题<textarea v-model="question" rows="9" placeholder="输入问题…" :class="{ 'file-drop-active': questionDrag }" @keydown="keydown" @dragenter="dragQuestion" @dragover="dragQuestion" @dragleave="leaveQuestion" @drop="dropQuestionFiles"></textarea></label>
+      <label>问题<textarea v-model="question" rows="9" placeholder="输入问题…" :class="{ 'file-drop-active': questionDrag }" @keydown="keydown" @paste="pasteQuestionImages" @dragenter="dragQuestion" @dragover="dragQuestion" @dragleave="leaveQuestion" @drop="dropQuestionFiles"></textarea></label>
       <AttachmentUploader ref="uploader" :disabled="busy" @state="uploadState = $event" />
       <label class="check-row"><input v-model="shareEnabled" type="checkbox" /> 生成分享链接</label>
       <p v-if="error" class="error-box">{{ error }}</p>

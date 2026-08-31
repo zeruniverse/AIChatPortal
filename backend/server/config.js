@@ -17,11 +17,12 @@ export function loadConfig(rootDir) {
   };
   config.limits = {
     maxConcurrentTasks: 10,
-    maxCompressedAttachmentBytes: 70_000_000,
-    maxRawUploadBytesPerTurn: 0,
+    maxCompressedAttachmentBytes: 78_000_000,
+    maxRawUploadBytesPerTurn: 1_000_000_000,
     maxFilesPerTurn: 100,
     ...(config.limits || {})
   };
+  if (config.limits.maxRawUploadBytesPerTurn === 0) config.limits.maxRawUploadBytesPerTurn = 1_000_000_000;
   config.cleanup = {
     maxChatBytes: 3_000_000_000,
     pressureAgeHours: 24,
@@ -61,5 +62,6 @@ function validate(config) {
     if (typeof origin !== 'string' || !/^https?:\/\//i.test(origin) || origin.endsWith('/')) throw new Error(`cors.allowedOrigins 无效：${origin}`);
   }
   if (config.limits.maxConcurrentTasks < 1 || config.limits.maxConcurrentTasks > 10) throw new Error('maxConcurrentTasks 必须为 1 到 10');
-  if (config.limits.maxCompressedAttachmentBytes > 70_000_000) throw new Error('压缩附件上限不能超过 70,000,000 字节');
+  if (!Number.isSafeInteger(config.limits.maxCompressedAttachmentBytes) || config.limits.maxCompressedAttachmentBytes < 1 || config.limits.maxCompressedAttachmentBytes > 78_000_000) throw new Error('压缩附件上限必须为 1 到 78,000,000 字节');
+  if (!Number.isSafeInteger(config.limits.maxRawUploadBytesPerTurn) || config.limits.maxRawUploadBytesPerTurn < 1 || config.limits.maxRawUploadBytesPerTurn > 1_000_000_000) throw new Error('每轮附件原始总大小上限必须为 1 到 1,000,000,000 字节');
 }
