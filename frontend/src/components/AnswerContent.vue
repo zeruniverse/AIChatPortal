@@ -239,7 +239,7 @@ function protectMath(content) {
 function addCodeCopyButtons(html) {
   return html.replace(
     /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
-    '<div class="code-block"><div class="code-tools"><span class="code-language">代码</span><button type="button" class="button ghost compact code-copy" data-copy-code>复制代码</button></div><div class="code-body"><div class="code-line-numbers" aria-hidden="true"></div><pre><code$1>$2</code></pre></div></div>'
+    '<div class="code-block"><div class="code-tools"><span class="code-language">代码</span><button type="button" class="button ghost compact code-copy" data-copy-code title="复制代码" aria-label="复制代码">复制代码</button></div><div class="code-body"><div class="code-line-numbers" aria-hidden="true"></div><pre><code$1>$2</code></pre></div></div>'
   );
 }
 
@@ -260,10 +260,19 @@ async function handleMarkdownClick(event) {
   try {
     await copyText(code.textContent || '');
     button.textContent = '已复制';
+    button.setAttribute('aria-label', '已复制');
+    button.title = '已复制';
   } catch {
     button.textContent = '复制失败';
+    button.setAttribute('aria-label', '复制失败');
+    button.title = '复制失败';
   }
-  setTimeout(() => { if (button.isConnected) button.textContent = '复制代码'; }, 1600);
+  setTimeout(() => {
+    if (!button.isConnected) return;
+    button.textContent = '复制代码';
+    button.setAttribute('aria-label', '复制代码');
+    button.title = '复制代码';
+  }, 1600);
 }
 </script>
 
