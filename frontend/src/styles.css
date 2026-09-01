@@ -98,12 +98,18 @@ h2 { font-size: 1.1rem; }
 .markdown .code-copy::after { left: 12px; top: 11px; background: #424242; }
 .markdown .code-copy:hover { background: #505050; }
 .markdown .code-copy:hover::after { background: #505050; }
+.markdown .code-copy.copy-success { background: #16a34a; }
+.markdown .code-copy.copy-success::after { background: #16a34a; }
+.markdown .code-copy.copy-error { background: #dc2626; }
+.markdown .code-copy.copy-error::after { background: #dc2626; }
 .markdown .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 .markdown img { display: block; max-width: 100%; height: auto; border-radius: 10px; margin: 12px 0; }
 .markdown a { color: #2563eb; }
 .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; color: #64748b; font-weight: 800; }
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
 .empty { text-align: center; color: #64748b; }
+.scroll-fab { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 30; display: grid; place-items: center; width: 48px; height: 48px; min-height: 48px; padding: 0; border: 0; border-radius: 50%; background: #2563eb; color: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.18); cursor: pointer; font-size: 24px; font-weight: 700; line-height: 1; }
+.scroll-fab:hover { background: #1d4ed8; }
 @media (max-width: 640px) {
   .topbar { align-items: center; }
   .topbar nav { gap: 10px; font-size: .9rem; }

@@ -254,21 +254,26 @@ function markdown(content) {
 async function handleMarkdownClick(event) {
   const target = event.target instanceof Element ? event.target : event.target?.parentElement;
   const button = target?.closest?.('[data-copy-code]');
-  if (!button || !event.currentTarget.contains(button)) return;
+  if (!button || !event.currentTarget.contains(button) || button.dataset.copyBusy === 'true') return;
   const code = button.closest('.code-block')?.querySelector('code');
   if (!code) return;
+  button.dataset.copyBusy = 'true';
   try {
     await copyText(code.textContent || '');
+    button.classList.add('copy-success');
     button.textContent = '已复制';
     button.setAttribute('aria-label', '已复制');
     button.title = '已复制';
   } catch {
+    button.classList.add('copy-error');
     button.textContent = '复制失败';
     button.setAttribute('aria-label', '复制失败');
     button.title = '复制失败';
   }
   setTimeout(() => {
     if (!button.isConnected) return;
+    button.classList.remove('copy-success', 'copy-error');
+    delete button.dataset.copyBusy;
     button.textContent = '复制代码';
     button.setAttribute('aria-label', '复制代码');
     button.title = '复制代码';
