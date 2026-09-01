@@ -1,16 +1,94 @@
 <script setup>
-import { computed, reactive } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import 'highlight.js/styles/github-dark.css';
 import { parseAnswerSegments } from '../utils/answerParser.js';
 import { copyText } from '../utils/clipboard.js';
 
 const props = defineProps({ raw: { type: String, default: '' } });
 const open = reactive(new Set());
+const contentRoot = ref(null);
 const segments = computed(() => parseAnswerSegments(props.raw));
 function toggle(index) { open.has(index) ? open.delete(index) : open.add(index); }
+
+let highlighterPromise;
+function getHighlighter() {
+  if (!highlighterPromise) highlighterPromise = import('highlight.js').then((module) => module.default || module);
+  return highlighterPromise;
+}
+
+const languageNames = {
+  bash: 'Bash', c: 'C', cpp: 'C++', csharp: 'C#', css: 'CSS', go: 'Go',
+  html: 'HTML', java: 'Java', javascript: 'JavaScript', js: 'JavaScript',
+  json: 'JSON', jsx: 'JSX', kotlin: 'Kotlin', markdown: 'Markdown', md: 'Markdown',
+  php: 'PHP', plaintext: 'Text', python: 'Python', py: 'Python', ruby: 'Ruby',
+  rust: 'Rust', shell: 'Shell', sh: 'Shell', sql: 'SQL', swift: 'Swift', text: 'Text',
+  ts: 'TypeScript', tsx: 'TSX', typescript: 'TypeScript', vue: 'Vue', xml: 'XML', yaml: 'YAML', yml: 'YAML'
+};
+
+function getDeclaredLanguage(code) {
+  const className = [...code.classList].find((name) => name.startsWith('language-'));
+  return className ? className.slice('language-'.length).trim().toLowerCase() : '';
+}
+
+function formatLanguage(language) {
+  const value = String(language || '').trim();
+  if (!value) return '代码';
+  return languageNames[value.toLowerCase()] || value;
+}
+
+function codeLineCount(text) {
+  const value = String(text ?? '').replace(/\n$/, '');
+  return Math.max(1, value.split('\n').length);
+}
+
+async function enhanceCodeBlocks() {
+  const root = contentRoot.value;
+  if (!root) return;
+  const blocks = [...root.querySelectorAll('.code-block')];
+  if (!blocks.length) return;
+
+  for (const block of blocks) {
+    const code = block.querySelector('code');
+    const numbers = block.querySelector('.code-line-numbers');
+    const label = block.querySelector('.code-language');
+    if (!code || !numbers || !label) continue;
+    const text = code.textContent || '';
+    numbers.textContent = Array.from({ length: codeLineCount(text) }, (_, index) => index + 1).join('\n');
+    const declared = getDeclaredLanguage(code);
+    label.textContent = formatLanguage(declared);
+  }
+
+  const hljs = await getHighlighter();
+  for (const block of blocks) {
+    if (!block.isConnected) continue;
+    const code = block.querySelector('code');
+    const label = block.querySelector('.code-language');
+    if (!code || !label || code.dataset.highlightedByApp === 'true') continue;
+    const text = code.textContent || '';
+    const declared = getDeclaredLanguage(code);
+    let result;
+    if (declared && hljs.getLanguage(declared)) {
+      result = hljs.highlight(text, { language: declared, ignoreIllegals: true });
+    } else {
+      result = hljs.highlightAuto(text);
+      if (!declared && result.language) label.textContent = formatLanguage(result.language);
+    }
+    code.innerHTML = result.value;
+    code.classList.add('hljs');
+    code.dataset.highlightedByApp = 'true';
+  }
+}
+
+function scheduleCodeEnhancement() {
+  nextTick(() => enhanceCodeBlocks());
+}
+
+onMounted(scheduleCodeEnhancement);
+watch(() => props.raw, scheduleCodeEnhancement, { flush: 'post' });
 
 function isEscaped(text, index) {
   let slashes = 0;
@@ -161,7 +239,7 @@ function protectMath(content) {
 function addCodeCopyButtons(html) {
   return html.replace(
     /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
-    '<div class="code-block"><button type="button" class="button ghost compact code-copy" data-copy-code>复制代码</button><pre><code$1>$2</code></pre></div>'
+    '<div class="code-block"><div class="code-tools"><span class="code-language">代码</span><button type="button" class="button ghost compact code-copy" data-copy-code>复制代码</button></div><div class="code-body"><div class="code-line-numbers" aria-hidden="true"></div><pre><code$1>$2</code></pre></div></div>'
   );
 }
 
@@ -190,7 +268,7 @@ async function handleMarkdownClick(event) {
 </script>
 
 <template>
-  <div class="answer-content">
+  <div ref="contentRoot" class="answer-content">
     <template v-for="(segment, index) in segments" :key="`${segment.type}-${segment.index ?? index}`">
       <div v-if="segment.type === 'answer'" class="markdown" v-html="markdown(segment.content)" @click="handleMarkdownClick"></div>
       <div v-else class="think-block">

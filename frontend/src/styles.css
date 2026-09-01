@@ -85,9 +85,15 @@ h2 { font-size: 1.1rem; }
 .markdown pre, .markdown table { max-width: 100%; overflow-x: auto; display: block; }
 .markdown pre { padding: 12px; background: #0f172a; color: #e2e8f0; border-radius: 10px; }
 .markdown .code-block { position: relative; margin: 1em 0; }
-.markdown .code-block pre { margin: 0; padding-top: 46px; }
-.markdown .code-block code { white-space: pre; overflow-wrap: normal; word-break: normal; }
-.markdown .code-copy { position: absolute; z-index: 1; top: 8px; right: 8px; min-height: 32px; padding: 4px 9px; background: #0f172a; color: #e2e8f0; border-color: #475569; }
+.markdown .code-tools { position: absolute; z-index: 2; top: 8px; right: 8px; display: flex; align-items: center; gap: 8px; }
+.markdown .code-language { max-width: min(40vw, 220px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; font-size: .82rem; font-weight: 700; }
+.markdown .code-body { display: flex; align-items: stretch; max-width: 100%; overflow-x: auto; background: #0f172a; border-radius: 10px; }
+.markdown .code-line-numbers { position: sticky; left: 0; z-index: 1; flex: 0 0 auto; min-width: 3.25rem; padding: 46px 11px 12px 8px; background: #0f172a; border-right: 1px solid #334155; color: #64748b; text-align: right; white-space: pre; user-select: none; }
+.markdown .code-body pre { flex: 1 0 auto; min-width: calc(100% - 3.25rem); max-width: none; margin: 0; padding: 46px 14px 12px; overflow: visible; border-radius: 0; }
+.markdown .code-body pre, .markdown .code-line-numbers { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: .875rem; line-height: 1.55; }
+.markdown .code-block code { font: inherit; white-space: pre; overflow-wrap: normal; word-break: normal; }
+.markdown .code-block .hljs { padding: 0; background: transparent; }
+.markdown .code-copy { flex: 0 0 auto; min-height: 32px; padding: 4px 9px; background: #0f172a; color: #e2e8f0; border-color: #475569; }
 .markdown .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 .markdown img { display: block; max-width: 100%; height: auto; border-radius: 10px; margin: 12px 0; }
 .markdown a { color: #2563eb; }
