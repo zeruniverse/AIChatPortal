@@ -84,6 +84,11 @@ h2 { font-size: 1.1rem; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown pre, .markdown table { max-width: 100%; overflow-x: auto; display: block; }
 .markdown pre { padding: 12px; background: #0f172a; color: #e2e8f0; border-radius: 10px; }
+.markdown .code-block { position: relative; margin: 1em 0; }
+.markdown .code-block pre { margin: 0; padding-top: 46px; }
+.markdown .code-block code { white-space: pre; overflow-wrap: normal; word-break: normal; }
+.markdown .code-copy { position: absolute; z-index: 1; top: 8px; right: 8px; min-height: 32px; padding: 4px 9px; background: #0f172a; color: #e2e8f0; border-color: #475569; }
+.markdown .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 .markdown img { display: block; max-width: 100%; height: auto; border-radius: 10px; margin: 12px 0; }
 .markdown a { color: #2563eb; }
 .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; color: #64748b; font-weight: 800; }
